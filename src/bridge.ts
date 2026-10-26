@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import type { AvatarEvent } from "./avatar.ts";
 import type { Action, ActionResult, Command, GameState, ViewerEvent } from "./types.ts";
 import { validState } from "./types.ts";
+import { allowedAsset, resolvedAsset, assetContentType, hasInstalledModel } from "./overlay-assets.ts";
 type Pending={cmd:Command;resolve:(r:ActionResult)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout};
 export class GameBridge {
   private server:Server|undefined;
@@ -48,6 +49,7 @@ export class GameBridge {
   }
   async start():Promise<void>{
     const html=await readFile(new URL("../overlay/index.html",import.meta.url),"utf8");
+    const live2d=await readFile(new URL("../overlay/live2d.js",import.meta.url),"utf8");
     this.server=createServer(async(req,res)=>{
       try{
         if(req.url==="/health"&&req.method==="GET")return this.reply(res,200,{ok:true,connected:Boolean(this.getState())});
@@ -55,6 +57,28 @@ export class GameBridge {
         if(req.url==="/overlay"&&req.method==="GET"){
           res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});
           res.end(html);return;
+        }
+        if(req.url==="/overlay/live2d.js"&&req.method==="GET"){
+          res.writeHead(200,{"content-type":"text/javascript; charset=utf-8","cache-control":"no-cache",
+            "x-content-type-options":"nosniff"});
+          res.end(live2d);return;
+        }
+        if(req.url==="/overlay/assets/status"&&req.method==="GET")
+          return this.reply(res,200,{installed:await hasInstalledModel(),license:"CC BY-NC-SA 4.0",assetSource:"Andersen216/dsh-whale-girl-live2d"});
+        if(req.url?.startsWith("/overlay/assets/")&&req.method==="GET"){
+          let file:string;
+          try{file=decodeURIComponent(req.url.slice("/overlay/assets/".length).split("?")[0]);}
+          catch{return this.reply(res,400,{error:"bad asset path"});}
+          if(!allowedAsset(file))return this.reply(res,404,{error:"unknown asset"});
+          const absolute=resolvedAsset(file);
+          if(!absolute)return this.reply(res,404,{error:"unknown asset"});
+          try{
+            const bytes=await readFile(absolute);
+            res.writeHead(200,{"content-type":assetContentType(file),"cache-control":"private, max-age=3600",
+              "x-content-type-options":"nosniff"});
+            res.end(bytes);
+          }catch{return this.reply(res,404,{error:"model resource is not installed"});}
+          return;
         }
         if(req.url==="/overlay/events"&&req.method==="GET"){
           res.writeHead(200,{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-cache","connection":"keep-alive"});
