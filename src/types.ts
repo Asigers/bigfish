@@ -59,6 +59,37 @@ export function validState(input: unknown): input is GameState {
     && (s.economy === undefined || validEconomy(s.economy))
     && (s.waterSources === undefined || (Array.isArray(s.waterSources)&&s.waterSources.length<=80&&s.waterSources.every(coordinate)));
 }
+// Field names only: never echo inventory, save identifiers or user data to diagnostics.
+export function stateValidationIssues(input: unknown): string[] {
+  if (!record(input)) return ["state must be an object"];
+  const s = input as Record<string, unknown>;
+  const issues: string[] = [];
+  const numberFields = ["day", "time", "energy", "x", "y", "inventoryFree"];
+  if (typeof s.saveId !== "string" || !s.saveId.length || s.saveId.length >= 120) issues.push("saveId");
+  if (!locName(s.location)) issues.push("location");
+  if (typeof s.season !== "string") issues.push("season");
+  if (typeof s.paused !== "boolean") issues.push("paused");
+  for (const k of numberFields) if (!Number.isFinite(s[k])) issues.push(k);
+  if (!coordinate({x: s.x, y: s.y})) issues.push("player coordinates");
+  if (typeof s.day !== "number" || s.day <= 0 || s.day > 28) issues.push("day range");
+  const checkArray = (key: string, max: number, validate: (v: any) => boolean) => {
+    const values = s[key];
+    if (!Array.isArray(values) || values.length > max) { issues.push(key + " array/length"); return; }
+    const index = values.findIndex(v => !validate(v));
+    if (index >= 0) issues.push(key + "[" + index + "]");
+  };
+  checkArray("crops", 250, v => coordinate(v) && typeof v.watered === "boolean" && typeof v.ready === "boolean");
+  checkArray("emptyPlots", 250, v => coordinate(v) && typeof v.watered === "boolean");
+  checkArray("tillable", 250, coordinate);
+  checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
+    /^\\(O\\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && v.count > 0);
+  checkArray("exits", 50, v => coordinate(v) && locName(v.target));
+  checkArray("worldLinks", 300, v => record(v) && locName(v.from) && locName(v.to));
+  if (s.bed !== null && !coordinate(s.bed)) issues.push("bed");
+  if (s.economy !== undefined && !validEconomy(s.economy)) issues.push("economy");
+  if (s.waterSources !== undefined) checkArray("waterSources", 80, coordinate);
+  return issues.length ? issues.slice(0, 12) : ["unknown validation mismatch"];
+}
 export function actionKey(a: Action): string { return JSON.stringify(a); }
 
 export function validEconomy(value:unknown):value is EconomyState {
