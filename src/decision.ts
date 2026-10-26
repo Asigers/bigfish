@@ -72,14 +72,20 @@ export function parseDecision(raw:string):Decision {
 export class Autopilot {
   private failures=new Map<string,number>();
   private prevDay="";
+  private lastPosition="";
   private endingDay=false;
   private syncDay(s:GameState):void {
     const dayKey=s.saveId+":"+s.season+":"+s.day;
+    const position=s.location+":"+s.x+":"+s.y;
     if(this.prevDay!==dayKey){
       this.failures.clear();
       this.endingDay=false;
       this.prevDay=dayKey;
+    }else if(this.lastPosition && this.lastPosition!==position){
+      // A manual reposition or recovered warp is a meaningful change in route feasibility.
+      this.failures.clear();
     }
+    this.lastPosition=position;
   }
   observe(s:GameState,recent:ActionResult[],action?:Action):void {
     this.syncDay(s);
