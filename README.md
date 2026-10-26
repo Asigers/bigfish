@@ -1,30 +1,42 @@
-# BigFish 🐟
+# BigFish 🐟 — Autonomous Stardew Valley farm agent (v0.2)
 
-**A Mac-first experimental autonomous Stardew Valley agent**, using Pi SDK + TypeScript + a SMAPI (C#) game bridge. No Windows VM, Python daemon or Redis required.
+Mac-first autonomous **farming cycle** using Pi SDK (TypeScript) plus a local SMAPI (C#) mod. The controller is a process on your Mac. No Windows VM or Python runtime required.
 
-> v0.1 MVP, **not** production-ready unattended gameplay. The offline demo is runnable without Stardew Valley or an AI account. The real-game bridge requires a local SMAPI build and game-side verification.
+> **Experimental game-control prototype, not a complete general Stardew player.** The farm loop is implemented in source and exercised in the offline simulator; the C# mod still requires compilation with your installed game and real gameplay testing. Use a BACKUP SAVE, not your main save.
 
-## What works in v0.1
+## v0.2 farming loop
 
-- A loop that observes game state, asks Pi for one JSON action, validates it and waits for a real result before replanning.
-- A restricted Pi session with **no shell, file, browser or arbitrary tools**, and no user extensions/skills.
-- A local authenticated HTTP bridge with heartbeat freshness, one-command-at-a-time, command timeouts, result IDs and mock viewer events.
-- A SMAPI source mod that reads player position, farm crops, time, energy and menu state; provides path movement and **prototype crop watering**.
-- A deterministic offline simulator and unit tests for the parser/planner.
+After loading a game, the controller reads world state and performs:
 
-**Not yet built:** real watering-can animation and water consumption, planting, harvesting, fishing, mining, sleeping, multi-day unattended play, OBS integration, TTS, an avatar, or authenticated Bilibili gifts. A live SMAPI build and integration test has **not** been performed in this repository.
+1. **Harvest** mature crops, if there is inventory space.
+2. **Water** planted dry crops.
+3. **Plant** seeds that already exist in the player's inventory into empty tilled soil.
+4. **Till** a small number of nearby safe diggable tiles when more plots are needed.
+5. **Travel** through mapped location exits (including Farm ↔ FarmHouse door fallback).
+6. **Sleep** in the actual farmhouse bed through the game's built-in sleep action, then repeat next morning.
 
-## Requirements
+Failure counters prevent repeatedly issuing a permanently failing action in the same day. Commands include save ID, day and source location to reject stale commands, and the controller waits for a new game snapshot after each action.
 
-- macOS (Apple Silicon or Intel), Steam Stardew Valley 1.6.x, SMAPI 4.5.x.
-- Node.js 22.16+ and npm.
-- .NET SDK compatible with SMAPI, for building the included C# mod.
-- A Pi model/provider configured locally for real AI mode; **not needed** for the demo.
-- Separate **backup save** for testing. The prototype mutates planted soil directly.
+Pi is **optional for the deterministic offline demo**, but used in real `npm run start` mode for character speech and suggestions. The farm-day planner retains control of the task phase so a model cannot idle forever or wander away in place of farming.
 
-## 1. Offline demo: no game or API key
+### Remaining limitations
 
-```sh
+- **Needs pre-existing seeds**: buying seeds, chest withdrawal, shipping/selling, tools crafting and general exploration are NOT implemented. On an empty inventory the agent will finish the day and sleep rather than magically create seeds.
+- Tilling and watering still use prototype game-state mutations, not visible Hoe/watering-can tool animations. Planting calls `HoeDirt.plant`; harvesting calls the built-in `Crop.harvest`.
+- Multi-location travel follows game `warps` and the farmhouse-door fallback; custom door actions, festivals and locked transitions may not work.
+- Multiplayer is unsupported. Menus, scripted events, unsupported maps, inaccessible plots and some mod combinations require intervention.
+- No Bilibili integration, actual gift effects, TTS, avatar or OBS overlay yet.
+- Snapshot protocol and the TypeScript integration tests are verified in CI; **SMAPI Mac compilation, game animation and overnight saving remain unverified** until tested against a local Stardew installation.
+
+## Mac requirements
+
+- macOS, Steam/GOG Stardew Valley 1.6.14+, SMAPI 4.5.x.
+- Node.js 22.16+ and npm; .NET 6-capable SDK for the C# mod.
+- Optional: a working Pi model/provider configuration to enable AI dialogue.
+
+## Quick start: fully simulated farm (no game, API keys or Steam)
+
+```bash
 git clone https://github.com/Asigers/bigfish.git
 cd bigfish
 npm install
@@ -32,65 +44,67 @@ npm test
 npm run demo
 ```
 
-The demo starts a simulated farm. You should see `move_to` and `water_tile` actions followed by 'today's crops are watered'. Stop with Ctrl+C. The mock decision mode deliberately **does not call Pi**.
+The simulator exercises real HTTP routes with a fake game, including planting, tilling, watering, harvesting and day changes. Stop with Ctrl+C.
 
-## 2. Build/install the game bridge on Mac
+## Install SMAPI bridge on your Mac
 
-Install Stardew Valley and SMAPI first, then open the game once through SMAPI. Build from this repository:
+1. Install Stardew Valley, install SMAPI, run the game once through SMAPI.
+2. From the repository root, compile:
 
-```sh
+```bash
 dotnet build mods/BigFishBridge/BigFishBridge.csproj -c Release
 ```
 
-The ModBuildConfig package generally copies builds into the game's Mods directory when it detects the installed game. Confirm that the resulting directory contains `BigFishBridge.dll` and `manifest.json`. If auto-detection fails, set the documented ModBuildConfig `GamePath` option or manually copy the build output and manifest into `Stardew Valley/Mods/BigFishBridge/`.
+SMAPI's ModBuildConfig normally locates and deploys the assembly to the game's `Mods` directory. If it does not, inspect the build output, and manually place `BigFishBridge.dll` and `manifest.json` into `Stardew Valley/Mods/BigFishBridge/`. Check the exact Mods path SMAPI logs on startup. Do not copy `mods/BigFishBridge/` source files into Mods instead of the compiled DLL.
 
-Create or edit `Mods/BigFishBridge/config.json`:
+3. Generate **one** random token in the current terminal:
 
-```json
-{ "Port": 45931, "Token": "your-random-token-should-be-16-or-more-characters" }
+```bash
+export BIGFISH_TOKEN="$(openssl rand -hex 24)"
+echo "$BIGFISH_TOKEN"
 ```
 
-## 3. Run with the real game
+4. In the installed `Mods/BigFishBridge/config.json`, set:
 
-Generate a secret on the Mac terminal and set that **same token** in the mod config:
+```json
+{"Port":45931,"Token":"PASTE_THE_EXACT_BIGFISH_TOKEN_FROM_YOUR_TERMINAL"}
+```
 
-```sh
-export BIGFISH_TOKEN="$(openssl rand -hex 24)"
+5. With that same environment variable in the current terminal, start the controller:
+
+```bash
 npm run start
 ```
 
-Start Stardew Valley **through SMAPI**, load a *backup* save and enter the Farm. The console should show state sync and Pi decisions. `npm run start` uses your locally configured Pi provider/model and needs valid credentials. Keep the game and terminal open.
+6. Launch Stardew through SMAPI, load a **throwaway/backup** save, and enter the farm. Ensure some starter seeds exist in the backpack. Start small (2–3 plots) until game actions have been verified.
 
-For initial debugging, you can disable model calls and run only deterministic actions:
+For testing the C# bridge **without spending model tokens**, run instead:
 
-```sh
-BIGFISH_TOKEN="same-token-as-in-mod-config" node --experimental-strip-types src/index.ts --mock
+```bash
+node --experimental-strip-types src/index.ts --mock
 ```
 
-Health check (no secret required):
+Check the local bridge health:
 
-```sh
+```bash
 curl http://127.0.0.1:45931/health
 ```
 
-If `connected:false`, check SMAPI logs, whether a save is open, the mod's config and port. No remote binding or external dashboard is exposed.
+`connected: true` means the game posted state recently. A healthy connection alone does not validate that all C# actions are safe in-game.
 
-## 4. Simulate a viewer event
+## Simulated viewer chat
 
-The `/event` endpoint merely queues context for the next Pi decision. It does **not** grant in-game rewards and is **not** a Bilibili webhook.
-
-```sh
+```bash
 curl -X POST http://127.0.0.1:45931/event \
   -H "x-bigfish-token: $BIGFISH_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"kind":"chat","user":"test-viewer","text":"今天先去浇水"}'
+  -d '{"kind":"chat","user":"viewer","text":"记得浇水"}'
 ```
 
-## Privacy and safety
+This **is not** a verified Bilibili event or an actual gift reward.
 
-- Binding is hardcoded to `127.0.0.1`; every mutation route requires a shared secret.
-- The secret is never committed. Use `.env.example` as a reference, not a real token.
-- Do not expose port 45931 to the network or use the mod against your main save.
-- Back up saves, and verify permissions/licensing before using third-party character artwork or enabling monetized live gifting.
+## Safety
 
-See [architecture and limitations](docs/architecture.md).
+The bridge is bound to `127.0.0.1`, mutating endpoints require a shared token, and the Pi session has no shell/file/browser tools. Never expose port 45931 publicly. Never commit your `config.json`, `.env` or game saves.
+
+See [architecture and protocol](docs/architecture.md) for the source-state contract, failure boundaries and extension plan.
