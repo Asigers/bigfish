@@ -87,9 +87,16 @@ public sealed class ModEntry : Mod
         if (client == null || !Context.IsWorldReady || !Context.IsMainPlayer) return;
         if (e.IsMultipleOf(40) && !posting)
         {
-            var snapshot = Snapshot(); // never access game objects from async HTTP continuations
-            posting = true;
-            _ = PostStateAsync(snapshot);
+            try
+            {
+                var snapshot = Snapshot(); // never access game objects from async HTTP continuations
+                posting = true;
+                _ = PostStateAsync(snapshot);
+            }
+            catch (Exception ex)
+            {
+                Monitor.Log("Snapshot failed: " + ex, LogLevel.Error);
+            }
         }
         if (e.IsMultipleOf(12) && !polling)
         {
@@ -568,7 +575,7 @@ public sealed class ModEntry : Mod
     private async Task PostStateAsync(object snapshot)
     {
         try { using var res = await client!.PostAsJsonAsync("/state", snapshot); res.EnsureSuccessStatusCode(); }
-        catch (Exception ex) { Monitor.Log("State sync: " + ex.Message, LogLevel.Trace); }
+        catch (Exception ex) { Monitor.Log("State sync failed: " + ex, LogLevel.Warn); }
         finally { posting = false; }
     }
     private async Task PollAsync()
