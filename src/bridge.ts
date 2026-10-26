@@ -54,7 +54,7 @@ export class GameBridge {
       try{
         if(req.url==="/health"&&req.method==="GET")return this.reply(res,200,{ok:true,connected:Boolean(this.getState())});
         // OBS loads an unprivileged, localhost-only overlay. Never expose the secret to browser source.
-        if(req.url==="/overlay"&&req.method==="GET"){
+        if((req.url==="/overlay" || req.url?.startsWith("/overlay?"))&&req.method==="GET"){
           res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});
           res.end(html);return;
         }
