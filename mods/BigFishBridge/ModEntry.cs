@@ -48,6 +48,7 @@ public sealed class ModEntry : Mod
     private string lastPolledId = "";
     private Warp? activeExit;
     private bool sleeping;
+    private List<Point>? cachedWaterSources;
 
     public override void Entry(IModHelper helper)
     {
@@ -67,11 +68,13 @@ public sealed class ModEntry : Mod
         helper.Events.GameLoop.UpdateTicked += OnTick;
         helper.Events.GameLoop.DayStarted += (_, _) =>
         {
+            cachedWaterSources = null;
             if (active?.Type == "sleep" && Game1.dayOfMonth != active.Day)
                 Finish(active, true, "next game day started");
         };
         helper.Events.GameLoop.ReturnedToTitle += (_, _) =>
         {
+            cachedWaterSources = null;
             if (active != null) Finish(active, false, "returned to title");
             while (incoming.TryDequeue(out _)) { }
             lastPolledId = "";
@@ -157,13 +160,23 @@ public sealed class ModEntry : Mod
                 else emptyPlots.Add(new { x, y, watered = dirt.state.Value == 1 });
                 if (crops.Count + emptyPlots.Count >= 200) break;
             }
-            // Detect map water refill sources near the farmer.
-            for (int dx = -10; dx <= 10 && waterSources.Count < 60; dx++)
-            for (int dy = -10; dy <= 10 && waterSources.Count < 60; dy++)
+            // Scan the farm map only once per game day, and only if the can is empty.
+            // Nearby-only scanning would deadlock when ponds are farther than ten tiles.
+            var can = player.Items.OfType<WateringCan>().FirstOrDefault();
+            if (can != null && can.WaterLeft == 0)
             {
-                int x = player.TilePoint.X + dx, y = player.TilePoint.Y + dy;
-                if (x >= 0 && y >= 0 && loc.isTileOnMap(x, y) && loc.CanRefillWateringCanOnTile(x, y))
-                    waterSources.Add(new { x, y });
+                if (cachedWaterSources == null)
+                {
+                    cachedWaterSources = new List<Point>();
+                    for (int x = 0; x < 160; x++)
+                    for (int y = 0; y < 160; y++)
+                        if (loc.isTileOnMap(x, y) && loc.CanRefillWateringCanOnTile(x, y))
+                            cachedWaterSources.Add(new Point(x, y));
+                }
+                foreach (var spot in cachedWaterSources
+                    .OrderBy(t => Math.Abs(t.X - player.TilePoint.X) + Math.Abs(t.Y - player.TilePoint.Y))
+                    .Take(60))
+                    waterSources.Add(new { x = spot.X, y = spot.Y });
             }
             // Never suggest land occupied by objects, terrain features, or non-diggable tiles.
             for (int dx = -7; dx <= 7 && tillable.Count < 40; dx++)
