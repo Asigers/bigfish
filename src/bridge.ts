@@ -1,5 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import type { AvatarEvent } from "./avatar.ts";
 import type { Action, ActionResult, Command, GameState, ViewerEvent } from "./types.ts";
 import { validState } from "./types.ts";
 type Pending={cmd:Command;resolve:(r:ActionResult)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout};
@@ -10,6 +12,7 @@ export class GameBridge {
   private stateSequence=0;
   private pending:Pending|undefined;
   private events:ViewerEvent[]=[];
+  private watchers=new Set<ServerResponse>();
   readonly token:string;
   readonly port:number;
   readonly host:string;
@@ -36,10 +39,30 @@ export class GameBridge {
     }
     return JSON.parse(value);
   }
+  publishAvatar(e:AvatarEvent):void{
+    const packet="event: speech\ndata: "+JSON.stringify(e)+"\n\n";
+    for(const watcher of this.watchers) {
+      if(watcher.destroyed){this.watchers.delete(watcher);continue;}
+      watcher.write(packet);
+    }
+  }
   async start():Promise<void>{
+    const html=await readFile(new URL("../overlay/index.html",import.meta.url),"utf8");
     this.server=createServer(async(req,res)=>{
       try{
         if(req.url==="/health"&&req.method==="GET")return this.reply(res,200,{ok:true,connected:Boolean(this.getState())});
+        // OBS loads an unprivileged, localhost-only overlay. Never expose the secret to browser source.
+        if(req.url==="/overlay"&&req.method==="GET"){
+          res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});
+          res.end(html);return;
+        }
+        if(req.url==="/overlay/events"&&req.method==="GET"){
+          res.writeHead(200,{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-cache","connection":"keep-alive"});
+          res.write(": bigfish overlay connected\n\n");
+          this.watchers.add(res);
+          req.on("close",()=>this.watchers.delete(res));
+          return;
+        }
         if(!this.authorized(req))return this.reply(res,401,{error:"unauthorized"});
         if(req.url==="/state"&&req.method==="POST"){
           const state=await this.body(req);
@@ -104,6 +127,8 @@ export class GameBridge {
   async stop():Promise<void>{
     const p=this.pending;this.pending=undefined;
     if(p){clearTimeout(p.timer);p.reject(Error("Bridge stopped"));}
+    for(const watcher of this.watchers)watcher.end();
+    this.watchers.clear();
     if(this.server)await new Promise<void>(resolve=>this.server!.close(()=>resolve()));
   }
 }
