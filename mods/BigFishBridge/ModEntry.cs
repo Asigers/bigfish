@@ -43,6 +43,9 @@ public sealed class ModEntry : Mod
     private ModConfig config = new();
     private RemoteCommand? active;
     private DateTime movementStarted;
+    private DateTime lastMovementDiagnostic;
+    private Point movementOrigin;
+    private Point movementDestination;
     private bool polling;
     private bool posting;
     private string lastPolledId = "";
@@ -216,10 +219,18 @@ public sealed class ModEntry : Mod
             .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack) })
             .ToArray();
         var rawExits = Exits(loc).Take(100).ToArray();
-        var invalidExits = rawExits.Count(w => !ValidNavigableExit(w));
-        if (invalidExits > 0 && reportedInvalidExitLocations.Add(loc.Name))
-            Monitor.Log("Skipping " + invalidExits + " invalid/off-map warp(s) in " + loc.Name,
-                LogLevel.Warn);
+        if (reportedInvalidExitLocations.Add(loc.Name))
+        {
+            for (int index = 0; index < rawExits.Length; index++)
+            {
+                var warp = rawExits[index];
+                if (!ValidNavigableExit(warp))
+                    Monitor.Log("Skipping warp " + loc.Name + "[" + index + "] at (" +
+                        warp.X + "," + warp.Y + ") to '" +
+                        (warp.TargetName?.Length > 80 ? warp.TargetName.Substring(0, 80) : warp.TargetName) +
+                        "' (invalid coordinate or target name)", LogLevel.Warn);
+            }
+        }
         var exits = rawExits.Where(ValidNavigableExit)
             .Take(50).Select(w => new { x = w.X, y = w.Y, target = w.TargetName }).ToArray();
         var links = Game1.locations.Where(l => ValidMapName(l.Name))
@@ -309,7 +320,7 @@ public sealed class ModEntry : Mod
             {
                 // Only a direct, mapped exit from the current location is accepted.
                 activeExit = Exits(loc)
-                    .Where(w => w.TargetName == cmd.Target)
+                    .Where(w => ValidNavigableExit(w) && w.TargetName == cmd.Target)
                     .OrderBy(w => Math.Abs(w.X - player.TilePoint.X) + Math.Abs(w.Y - player.TilePoint.Y))
                     .FirstOrDefault();
                 if (activeExit == null)
@@ -524,11 +535,59 @@ public sealed class ModEntry : Mod
 
     private void BeginMovement(Point destination)
     {
+        var player = Game1.player;
+        movementOrigin = player.TilePoint;
+        movementDestination = destination;
         movementStarted = DateTime.UtcNow;
-        if (Near(Game1.player.TilePoint, destination.X, destination.Y) &&
-            (active?.Type == "travel_to" || active?.Type == "sleep")) return;
-        Game1.player.controller = new PathFindController(Game1.player, Game1.player.currentLocation,
-            destination, 2, false);
+        lastMovementDiagnostic = movementStarted;
+        if (Near(movementOrigin, destination.X, destination.Y) &&
+            (active?.Type == "travel_to" || active?.Type == "sleep"))
+        {
+            Monitor.Log("Already near " + active?.Type + " target (" +
+                destination.X + "," + destination.Y + ") at (" +
+                movementOrigin.X + "," + movementOrigin.Y + ")", LogLevel.Info);
+            return;
+        }
+
+        var controller = new PathFindController(player, player.currentLocation, destination, 2, false);
+        Point chosen = destination;
+        // A door/bed may be impassable even if a neighboring tile is reachable.
+        // Only these two actions can complete from an adjacent tile.
+        if ((controller.pathToEndPoint == null || controller.pathToEndPoint.Count == 0) &&
+            (active?.Type == "travel_to" || active?.Type == "sleep"))
+        {
+            var candidates = new List<Point>();
+            for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                candidates.Add(new Point(destination.X + dx, destination.Y + dy));
+            }
+            foreach (var candidate in candidates.OrderBy(p =>
+                Math.Abs(p.X - movementOrigin.X) + Math.Abs(p.Y - movementOrigin.Y)))
+            {
+                if (!player.currentLocation.isTileOnMap(new Vector2(candidate.X, candidate.Y)))
+                    continue;
+                var alternate = new PathFindController(player, player.currentLocation, candidate, 2, false);
+                if (alternate.pathToEndPoint == null || alternate.pathToEndPoint.Count == 0)
+                    continue;
+                chosen = candidate;
+                controller = alternate;
+                break;
+            }
+        }
+        if (controller.pathToEndPoint == null || controller.pathToEndPoint.Count == 0)
+        {
+            if (active != null)
+                Finish(active, false, "no path from (" + movementOrigin.X + "," +
+                    movementOrigin.Y + ") to (" + destination.X + "," + destination.Y + ")");
+            return;
+        }
+        player.controller = controller;
+        Monitor.Log("Move " + active?.Type + " from (" + movementOrigin.X + "," +
+            movementOrigin.Y + ") toward (" + destination.X + "," + destination.Y +
+            ") via (" + chosen.X + "," + chosen.Y + "), path steps=" +
+            controller.pathToEndPoint.Count, LogLevel.Info);
     }
 
     private void Advance()
@@ -536,6 +595,16 @@ public sealed class ModEntry : Mod
         if (active == null) return;
         var cmd = active;
         var player = Game1.player;
+        if ((DateTime.UtcNow - lastMovementDiagnostic).TotalSeconds >= 4 &&
+            !Near(player.TilePoint, movementDestination.X, movementDestination.Y))
+        {
+            lastMovementDiagnostic = DateTime.UtcNow;
+            Monitor.Log("Move progress " + cmd.Type + ": started=(" + movementOrigin.X + "," +
+                movementOrigin.Y + "), now=(" + player.TilePoint.X + "," +
+                player.TilePoint.Y + "), target=(" + movementDestination.X + "," +
+                movementDestination.Y + "), controller=" + (player.controller != null),
+                LogLevel.Info);
+        }
         if (cmd.Type == "sleep")
         {
             if (Game1.dayOfMonth != cmd.Day) { Finish(cmd, true, "day advanced"); return; }
@@ -576,12 +645,17 @@ public sealed class ModEntry : Mod
             (player.controller == null && !(cmd.Type == "travel_to" && activeExit == null)))
         {
             player.controller = null;
-            Finish(cmd, false, "movement, warp or sleep timed out");
+            Finish(cmd, false, "movement or warp timed out: from (" +
+                movementOrigin.X + "," + movementOrigin.Y + ") now (" +
+                player.TilePoint.X + "," + player.TilePoint.Y + ") target (" +
+                movementDestination.X + "," + movementDestination.Y + ")" +
+                " controller=" + (player.controller != null));
         }
     }
 
     private void Finish(RemoteCommand cmd, bool ok, string message)
     {
+        if (!ok) Monitor.Log("Command " + cmd.Type + " failed: " + message, LogLevel.Warn);
         if (active?.Id == cmd.Id)
         {
             active = null;
