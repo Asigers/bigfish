@@ -174,7 +174,11 @@ export async function prepareAssets(assets, {cacheRoot, outputRoot, stageRoot, d
         (result === "cached" ? " (cached)" : ""));
     }
   });
-  await Promise.all(workers);
+  // Wait for every in-flight write to finish before the caller can remove
+  // the staging directory after a failed worker.
+  const outcomes = await Promise.allSettled(workers);
+  const failed = outcomes.find(result => result.status === "rejected");
+  if (failed) throw failed.reason;
   return {completed, cached};
 }
 async function getInventory(options) {
