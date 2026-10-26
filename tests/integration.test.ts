@@ -23,6 +23,16 @@ test("simulator completes farming, planting, tilling, harvesting and advances to
       maxDay=Math.max(maxDay,state.day);
       if(state.day>=3)break;
       const decision=planner.decide(state);
+      if(state.economy && (decision.action.type==="water_tile"||decision.action.type==="till_tile")){
+        const tool=decision.action.type==="water_tile"?"watering_can":"hoe";
+        if(state.economy.tools.equipped!==tool){
+          const seq=bridge.getStateSequence();
+          const r=await bridge.send({type:"equip_tool",tool},4000);
+          assert.equal(r.ok,true);
+          await bridge.waitForNextState(seq,4000);
+          continue;
+        }
+      }
       assert.equal(validateAgainstWorld(decision.action,state),true,JSON.stringify(decision.action));
       if(decision.action.type==="wait"){await new Promise(r=>setTimeout(r,100));continue;}
       types.add(decision.action.type);
