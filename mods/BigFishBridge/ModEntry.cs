@@ -99,6 +99,21 @@ public sealed class ModEntry : Mod
         Execute(cmd);
     }
 
+    // Farm doors are not guaranteed to appear in the raw location.warps table.
+    // Expose a conservative built-in Farm <-> FarmHouse link at the actual door locations.
+    private IEnumerable<Warp> Exits(GameLocation location)
+    {
+        foreach (var warp in location.warps) yield return warp;
+        var house = Game1.getLocationFromName("FarmHouse") as FarmHouse;
+        if (house == null) yield break;
+        var outer = Game1.getFarm().GetMainFarmHouseEntry();
+        var inner = house.getEntryLocation();
+        if (location.Name == "Farm" && !location.warps.Any(w => w.TargetName == "FarmHouse"))
+            yield return new Warp(outer.X, outer.Y, "FarmHouse", inner.X, inner.Y, false);
+        else if (location.Name == "FarmHouse" && !location.warps.Any(w => w.TargetName == "Farm"))
+            yield return new Warp(inner.X, inner.Y, "Farm", outer.X, outer.Y + 1, false);
+    }
+
     private object Snapshot()
     {
         var player = Game1.player;
@@ -140,9 +155,9 @@ public sealed class ModEntry : Mod
             .Take(60)
             .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack) })
             .ToArray();
-        var exits = loc.warps.Where(w => w.TargetName != null)
+        var exits = Exits(loc).Where(w => w.TargetName != null)
             .Take(50).Select(w => new { x = w.X, y = w.Y, target = w.TargetName }).ToArray();
-        var links = Game1.locations.SelectMany(l => l.warps.Select(w => new { from = l.Name, to = w.TargetName }))
+        var links = Game1.locations.SelectMany(l => Exits(l).Select(w => new { from = l.Name, to = w.TargetName }))
             .Where(l => l.to != null).Take(300).ToArray();
         Point? bed = loc is FarmHouse home && home.GetPlayerBed() != null ? home.GetPlayerBedSpot() : null;
         return new
@@ -187,7 +202,7 @@ public sealed class ModEntry : Mod
             if (cmd.Type == "travel_to")
             {
                 // Only a direct, mapped exit from the current location is accepted.
-                activeExit = loc.warps
+                activeExit = Exits(loc)
                     .Where(w => w.TargetName == cmd.Target)
                     .OrderBy(w => Math.Abs(w.X - player.TilePoint.X) + Math.Abs(w.Y - player.TilePoint.Y))
                     .FirstOrDefault();
@@ -281,7 +296,7 @@ public sealed class ModEntry : Mod
                 if (!player.Items.Any(i => i == null)) { Finish(cmd, false, "no free inventory slot"); return; }
                 var consumed = crop.harvest(cmd.X, cmd.Y, dirt);
                 if (consumed) dirt.crop = null; // game harvest returns true when crop must be removed
-                Finish(cmd, true, "harvest processed");
+                Finish(cmd, consumed || dirt.crop != crop, "harvest attempted; inspect inventory and crop state");
                 return;
             }
             Finish(cmd, false, "unsupported action");

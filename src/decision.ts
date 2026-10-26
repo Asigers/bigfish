@@ -75,21 +75,29 @@ export class Autopilot {
   decide(s:GameState):Decision {
     if(s.paused)return wait("Game menu or cutscene active");
     if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16){
-      return decision({type:"travel_to",target:"Farm"},"Return to farming","下地干活啦。");
+      const action:Action={type:"travel_to",target:"Farm"};
+      return can(action)?decision(action,"Return to farming","下地干活啦。"):wait("Farm commute repeatedly failed");
     }
+    const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
     const mustSleep=s.time>=2250||s.energy<=12;
     const goHome=():Decision=>{
-      if(s.location==="FarmHouse"&&s.bed)return decision({type:"sleep"},"End game day","回床上睡一觉！");
+      if(s.location==="FarmHouse"&&s.bed){
+        const action:Action={type:"sleep"};
+        return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
+      }
       const hop=nextHop(s,"FarmHouse");
-      return hop?decision({type:"travel_to",target:hop},"Return home","天晚了，要回家。"):wait("No home route");
+      if(!hop)return wait("No home route");
+      const action:Action={type:"travel_to",target:hop};
+      return can(action)?decision(action,"Return home","天晚了，要回家。"):wait("Travel repeatedly failed; manual help required");
     };
     if(mustSleep)return goHome();
     if(s.location!=="Farm"){
       const hop=nextHop(s,"Farm");
-      return hop?decision({type:"travel_to",target:hop},"Return to farm","回农场看看。"):wait("Farm is unreachable");
+      if(!hop)return wait("Farm is unreachable");
+      const action:Action={type:"travel_to",target:hop};
+      return can(action)?decision(action,"Return to farm","回农场看看。"):wait("Farm commute repeatedly failed");
     }
     const pos={x:s.x,y:s.y};
-    const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
     const nearest=<T extends Tile>(arr:T[]):T[]=>[...arr].sort((a,b)=>distance(a,pos)-distance(b,pos));
     const choose=(tiles:Tile[],make:(t:Tile)=>Action,label:string,speech:string):Decision|undefined=>{
       for(const t of nearest(tiles)){
@@ -109,8 +117,10 @@ export class Autopilot {
       const plant=choose(s.emptyPlots,t=>({type:"plant_seed",x:t.x,y:t.y,seedId:seed.id}),"Plant available seeds","来种点东西。");
       if(plant)return plant;
       // Till one tile only after the existing plot pool has been exhausted.
-      const till=choose(s.tillable,t=>({type:"till_tile",x:t.x,y:t.y}),"Prepare soil","开垦新土地！");
-      if(till)return till;
+      if(s.emptyPlots.length===0){
+        const till=choose(s.tillable,t=>({type:"till_tile",x:t.x,y:t.y}),"Prepare soil","开垦新土地！");
+        if(till)return till;
+      }
     }
     return goHome();
   }
