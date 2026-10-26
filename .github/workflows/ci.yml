@@ -3,8 +3,12 @@ on:
   push:
   pull_request:
 jobs:
-  node:
-    runs-on: ubuntu-latest
+  controller:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -13,3 +17,5 @@ jobs:
       - run: npm install
       - run: npm test
       - run: npm run typecheck
+# C# SMAPI compilation needs locally installed Stardew Valley game assemblies.
+# No executable gameplay validation is claimed by this workflow.
