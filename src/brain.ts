@@ -2,12 +2,24 @@ import type { Decision, GameState, ViewerEvent, ActionResult } from "./types.ts"
 import { parseDecision, validateAgainstWorld } from "./decision.ts";
 import { parseStrategy } from "./strategy.ts";
 import type { Strategy } from "./economy.ts";
+import { chooseModel, parseThinkingLevel } from "./model-config.ts";
 
 export class PiBrain {
   private session: { prompt: (text:string)=>Promise<unknown>;getLastAssistantText:()=>string|undefined;dispose:()=>void;abort:()=>Promise<unknown> }|undefined;
   async start():Promise<void> {
     const sdk=await import("@earendil-works/pi-coding-agent");
     const cwd=process.cwd();
+    // Reuse Pi's actual model catalog, credentials and saved defaults.
+    // BigFish keeps its no-tools policy and in-memory conversation separate.
+    const modelRuntime=await sdk.ModelRuntime.create();
+    const available=await modelRuntime.getAvailable();
+    if(available.length===0)throw Error(
+      "No authenticated Pi models available. Configure ~/.pi/agent/models.json and /login in pi."
+    );
+    const selected=chooseModel(available,process.env.BIGFISH_PROVIDER,process.env.BIGFISH_MODEL);
+    const thinkingLevel=parseThinkingLevel(process.env.BIGFISH_THINKING);
+    const settingsManager=sdk.SettingsManager.create(cwd);
+    settingsManager.applyOverrides({retry:{enabled:false},compaction:{enabled:true}});
     const resourceLoader: import("@earendil-works/pi-coding-agent").ResourceLoader={
       getExtensions:()=>({extensions:[],errors:[],runtime:sdk.createExtensionRuntime()}),
       getSkills:()=>({skills:[],diagnostics:[]}),
@@ -29,10 +41,18 @@ export class PiBrain {
     };
     const {session}=await sdk.createAgentSession({
       cwd,resourceLoader,noTools:"all",tools:[],sessionManager:sdk.SessionManager.inMemory(cwd),
-      settingsManager:sdk.SettingsManager.inMemory({retry:{enabled:false},compaction:{enabled:true}})
+      modelRuntime,
+      ...(selected?{model:selected}:{}),
+      ...(thinkingLevel?{thinkingLevel}:{}),
+      settingsManager
     });
     if(session.getActiveToolNames().length){session.dispose();throw Error("Unexpected tools active");}
     this.session=session;
+    const active=session.model;
+    console.log("[bigfish] Pi model: "+(active?active.provider+"/"+active.id:"none")+
+      " | thinking="+session.thinkingLevel+
+      (selected?" | explicit BigFish selection":" | Pi saved default / fallback"));
+    if(!active){session.dispose();this.session=undefined;throw Error("Pi selected no model");}
   }
   async decide(s:GameState,recent:ActionResult[],events:ViewerEvent[]):Promise<Decision> {
     if(!this.session)throw Error("Brain not started");
