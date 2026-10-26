@@ -3,7 +3,7 @@ import { timingSafeEqual, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { AvatarEvent } from "./avatar.ts";
 import type { Action, ActionResult, Command, GameState, ViewerEvent } from "./types.ts";
-import { validState, stateValidationIssues } from "./types.ts";
+import { validState, stateValidationIssues, sanitizeStateExits } from "./types.ts";
 import { allowedAsset, resolvedAsset, assetContentType, hasInstalledModel } from "./overlay-assets.ts";
 type Pending={cmd:Command;resolve:(r:ActionResult)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout};
 export class GameBridge {
@@ -11,6 +11,7 @@ export class GameBridge {
   private state:GameState|undefined;
   private stateAt=0;
   private stateSequence=0;
+  private lastInvalidExitLogAt=0;
   private pending:Pending|undefined;
   private events:ViewerEvent[]=[];
   private watchers=new Set<ServerResponse>();
@@ -89,7 +90,12 @@ export class GameBridge {
         }
         if(!this.authorized(req))return this.reply(res,401,{error:"unauthorized"});
         if(req.url==="/state"&&req.method==="POST"){
-          const state=await this.body(req);
+          const rawState=await this.body(req);
+          const {state,ignoredExits}=sanitizeStateExits(rawState);
+          if(ignoredExits>0 && Date.now()-this.lastInvalidExitLogAt>60000){
+            this.lastInvalidExitLogAt=Date.now();
+            console.warn("[bridge] ignored "+ignoredExits+" invalid/off-map exit(s) in snapshot");
+          }
           if(!validState(state))return this.reply(res,400,{error:"invalid state",fields:stateValidationIssues(state)});
           this.state=state;this.stateAt=Date.now();this.stateSequence++;
           return this.reply(res,200,{ok:true});
