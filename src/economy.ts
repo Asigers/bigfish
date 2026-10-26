@@ -105,8 +105,9 @@ export class EconomyPlanner {
     if(s.location==="SeedShop"){
       const shop=e.shop;
       if(!shop||!shop.open){
-        const exit=travel("Farm","Shop is closed or keeper absent","商店不开门，先回家。");
-        return exit;
+        if(s.time<900)return issue({type:"wait",seconds:10},"Wait for shop opening","皮埃尔还没开门。");
+        this.errand=null;
+        return travel("Farm","Shop is closed or keeper absent","商店不开门，先回家。");
       }
       if(seedCount>=strategy.seedReserve || this.shopAttempted || e.gold<30){
         this.errand=null;
@@ -116,7 +117,8 @@ export class EconomyPlanner {
       // Spend at most half of current cash on one buying batch; preserve emergency funds.
       const offer=stock[0];
       if(offer){
-        const max=Math.max(1,Math.floor((e.gold*0.5)/offer.price));
+        const spendFraction=strategy.goal==="expand"?0.75:strategy.goal==="save"?0.25:0.5;
+        const max=Math.max(1,Math.floor((e.gold*spendFraction)/offer.price));
         const count=Math.min(strategy.seedReserve-seedCount,max,offer.stock<0?99:offer.stock,12);
         if(count>0){
           const a=interact(shop.keeper,{type:"buy_seed",itemId:offer.id,count},"Buy valid seasonal shop stock","补充一些种子，继续赚钱！");

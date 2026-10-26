@@ -431,10 +431,12 @@ public sealed class ModEntry : Mod
             purchased.Stack = cmd.Count;
             if (!player.couldInventoryAcceptThisItem(purchased))
             { Finish(cmd, false, "backpack cannot hold seeds"); return true; }
-            if (!player.addItemToInventoryBool(purchased))
-            { Finish(cmd, false, "inventory insertion failed"); return true; }
-            player.Money -= (int)price;
-            Finish(cmd, true, "purchased " + cmd.Count + " seeds for " + price + "g");
+            var remaining = player.addItemToInventory(purchased);
+            int accepted = cmd.Count - (remaining?.Stack ?? 0);
+            if (accepted <= 0) { Finish(cmd, false, "inventory insertion failed"); return true; }
+            player.Money -= offer.Value.Price * accepted;
+            Finish(cmd, accepted == cmd.Count,
+                "purchased " + accepted + "/" + cmd.Count + " seeds for " + offer.Value.Price * accepted + "g");
             return true;
         }
         if (cmd.Type == "store_item" || cmd.Type == "withdraw_item")
@@ -454,21 +456,28 @@ public sealed class ModEntry : Mod
                 if (slots.Count >= chest.GetActualCapacity() && !slots.Any(i => i != null && i.canStackWith(move)))
                 { Finish(cmd, false, "chest full"); return true; }
                 var remainder = chest.addItem(move);
-                if (remainder != null && remainder.Stack > 0)
-                { Finish(cmd, false, "chest rejected item; original inventory unchanged"); return true; }
-                from.Stack -= cmd.Count;
-                if (from.Stack <= 0) player.removeItemFromInventory(from);
-                Finish(cmd, true, "stored items");
+                int stored = cmd.Count - (remainder?.Stack ?? 0);
+                if (stored > 0)
+                {
+                    from.Stack -= stored;
+                    if (from.Stack <= 0) player.removeItemFromInventory(from);
+                }
+                Finish(cmd, stored == cmd.Count, "stored " + stored + "/" + cmd.Count + " items");
                 return true;
             }
             var inside = slots.FirstOrDefault(i => i?.QualifiedItemId == cmd.ItemId && i.Stack >= cmd.Count);
             if (inside == null) { Finish(cmd, false, "chest has insufficient items"); return true; }
             var take = inside.getOne(); take.Stack = cmd.Count;
-            if (!player.couldInventoryAcceptThisItem(take) || !player.addItemToInventoryBool(take))
+            if (!player.couldInventoryAcceptThisItem(take))
             { Finish(cmd, false, "backpack cannot accept item"); return true; }
-            inside.Stack -= cmd.Count;
-            if (inside.Stack <= 0) slots.Remove(inside);
-            Finish(cmd, true, "withdrew items");
+            var pending = player.addItemToInventory(take);
+            int transferred = cmd.Count - (pending?.Stack ?? 0);
+            if (transferred > 0)
+            {
+                inside.Stack -= transferred;
+                if (inside.Stack <= 0) slots.Remove(inside);
+            }
+            Finish(cmd, transferred == cmd.Count, "withdrew " + transferred + "/" + cmd.Count + " items");
             return true;
         }
         return false;
