@@ -44,6 +44,9 @@ test("OBS serves Live2D scripts, status and preserves SSE without credentials",a
     assert.match(html,/\/overlay\/live2d\.js/);
     assert.ok(!html.includes(token));
     assert.ok(!html.includes('viewBox="0 0 300 240"'),"old SVG should not be present");
+    const preview=await fetch(base+"/overlay?preview=1&zoom=1.3");
+    assert.equal(preview.status,200,"Preview/zoom query URLs must be served");
+    assert.match(await preview.text(),/鲸鱼娘 Live2D/);
     const loader=await fetch(base+"/overlay/live2d.js");
     assert.equal(loader.status,200);
     const script=await loader.text();
