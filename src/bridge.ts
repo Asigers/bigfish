@@ -75,6 +75,11 @@ export class GameBridge {
       this.server!.listen(this.port,this.host,resolve);
     });
   }
+  listeningPort(): number {
+    const address = this.server?.address();
+    if (!address || typeof address === "string") throw new Error("Bridge is not listening");
+    return address.port;
+  }
   getState(): GameState | undefined { return Date.now()-this.stateAt < 4000 ? this.state : undefined; }
   drainEvents(): ViewerEvent[] { return this.events.splice(0); }
   send(action: Exclude<Action,{type:"wait"}>, timeoutMs = 15000): Promise<ActionResult> {
