@@ -1,44 +1,132 @@
-import type { Action, Decision, GameState } from "./types.ts";
+import type { Action, Decision, GameState, Tile, ActionResult } from "./types.ts";
+import { actionKey } from "./types.ts";
 
-const wait = (reason: string): Decision => ({
-  action: { type: "wait", seconds: 3 }, reason, speech: "先观察一下农场。"
-});
-
-export function parseDecision(raw: string): Decision {
-  const cleaned = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
-  const obj: unknown = JSON.parse(cleaned);
-  if (!obj || typeof obj !== "object") throw new Error("Decision must be a JSON object");
-  const d = obj as { action?: Record<string, unknown>; speech?: unknown; reason?: unknown };
-  if (!d.action || typeof d.action !== "object") throw new Error("Missing action");
-  const action: Record<string, unknown> = d.action;
-  let checked: Action;
-  if (action.type === "wait" && Number.isFinite(action.seconds) && Number(action.seconds) >= 1 && Number(action.seconds) <= 15) {
-    checked = { type: "wait", seconds: Number(action.seconds) };
-  } else if ((action.type === "move_to" || action.type === "water_tile")
-     && Number.isInteger(action.x) && Number.isInteger(action.y)
-     && Number(action.x) >= 0 && Number(action.y) >= 0
-     && Number(action.x) <= 150 && Number(action.y) <= 150) {
-    checked = { type: action.type, x: Number(action.x), y: Number(action.y) };
-  } else {
-    throw new Error("Unknown or out-of-bounds action");
+const wait=(reason:string):Decision=>({action:{type:"wait",seconds:5},reason,speech:"稍微观察一下。"});
+const decision=(action:Action,reason:string,speech="本鲸继续干活。"):Decision=>({action,reason,speech});
+const close=(a:Tile,b:Tile):boolean=>Math.max(Math.abs(a.x-b.x),Math.abs(a.y-b.y))<=1;
+const distance=(a:Tile,b:Tile)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y);
+const walkNear=(s:GameState,t:Tile):Action=>{
+  if(close(s,t)) return {type:"wait",seconds:1};
+  const candidates:Tile[]=[];
+  for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+    if(dx===0&&dy===0)continue;
+    const c={x:t.x+dx,y:t.y+dy};
+    if(c.x>=0&&c.y>=0&&c.x<150&&c.y<150)candidates.push(c);
   }
-  return {
-    action: checked,
-    speech: typeof d.speech === "string" ? d.speech.slice(0, 100) : "",
-    reason: typeof d.reason === "string" ? d.reason.slice(0, 120) : ""
-  };
+  candidates.sort((a,b)=>distance(a,s)-distance(b,s));
+  // PathFindController verifies actual reachability; other candidate tiles are tried after failures.
+  return {type:"move_to",...candidates[0]};
+};
+function nextHop(s:GameState,destination:string):string|undefined {
+  if(s.location===destination)return undefined;
+  const graph=new Map<string,string[]>();
+  for(const l of s.worldLinks){
+    if(!graph.has(l.from))graph.set(l.from,[]);
+    graph.get(l.from)!.push(l.to);
+  }
+  graph.set(s.location,[...new Set([...(graph.get(s.location)??[]),...s.exits.map(e=>e.target)])]);
+  const queue=[{name:s.location, first:""}],visited=new Set([s.location]);
+  while(queue.length){
+    const current=queue.shift()!;
+    for(const to of graph.get(current.name)??[]){
+      if(visited.has(to))continue;visited.add(to);
+      const hop=current.first||to;
+      if(to===destination)return hop;
+      queue.push({name:to,first:hop});
+    }
+  }
+  return undefined;
 }
-
-export function mockDecision(state: GameState): Decision {
-  if (state.paused || state.location !== "Farm") return wait("Not safely active on the farm");
-  const targets = state.crops.filter(c => !c.watered);
-  if (!targets.length) return { action: { type: "wait", seconds: 5 }, speech: "今天地都浇完了。", reason: "No dry crops" };
-  targets.sort((a,b) => (Math.abs(a.x - state.x) + Math.abs(a.y - state.y)) - (Math.abs(b.x - state.x) + Math.abs(b.y - state.y)));
-  const c = targets[0];
-  if (Math.abs(c.x-state.x) <= 1 && Math.abs(c.y-state.y) <= 1) {
-    return { action: { type: "water_tile", x: c.x, y: c.y }, reason: "Water adjacent crop", speech: "给这棵苗喝点水。" };
+export function parseDecision(raw:string):Decision {
+  const cleaned=raw.trim().replace(/^`{3}(?:json)?\s*/i,"").replace(/\s*`{3}$/,"");
+  const obj:unknown=JSON.parse(cleaned);
+  if(!obj||typeof obj!=="object"||Array.isArray(obj))throw Error("Decision object required");
+  const d=obj as {action?:Record<string,unknown>;speech?:unknown;reason?:unknown};
+  const a=d.action;
+  if(!a||typeof a!=="object")throw Error("Action required");
+  let action:Action;
+  if(a.type==="wait"&&Number.isInteger(a.seconds)&&Number(a.seconds)>=1&&Number(a.seconds)<=15)
+    action={type:"wait",seconds:Number(a.seconds)};
+  else if(["move_to","water_tile","harvest_crop","till_tile","plant_seed"].includes(String(a.type)) &&
+    Number.isInteger(a.x)&&Number.isInteger(a.y)&&Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<256&&Number(a.y)<256){
+      if(a.type==="plant_seed"&&typeof a.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.seedId))
+        action={type:"plant_seed",x:Number(a.x),y:Number(a.y),seedId:a.seedId};
+      else if(a.type!=="plant_seed")
+        action={type:a.type as "move_to"|"water_tile"|"harvest_crop"|"till_tile",x:Number(a.x),y:Number(a.y)};
+      else throw Error("Bad seedId");
+    }
+  else if(a.type==="travel_to"&&typeof a.target==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(a.target))
+    action={type:"travel_to",target:a.target};
+  else if(a.type==="sleep")action={type:"sleep"};
+  else throw Error("Unsupported action");
+  return {action,speech:typeof d.speech==="string"?d.speech.slice(0,100):"",reason:typeof d.reason==="string"?d.reason.slice(0,120):""};
+}
+export class Autopilot {
+  private failures=new Map<string,number>();
+  private prevDay="";
+  observe(s:GameState,recent:ActionResult[],action?:Action):void {
+    const dayKey=s.saveId+":"+s.day;
+    if(this.prevDay!==dayKey){this.failures.clear();this.prevDay=dayKey;}
+    if(action&&recent.length&&!recent.at(-1)!.ok){
+      const k=s.location+":"+actionKey(action);
+      this.failures.set(k,(this.failures.get(k)??0)+1);
+    }
   }
-  const x = c.x + (state.x < c.x ? -1 : state.x > c.x ? 1 : 0);
-  const y = c.y + (state.y < c.y ? -1 : state.y > c.y ? 1 : 0);
-  return { action: { type: "move_to", x: Math.max(0,x), y: Math.max(0,y) }, reason: "Reach dry crop", speech: "去给庄稼浇水。" };
+  decide(s:GameState):Decision {
+    if(s.paused)return wait("Game menu or cutscene active");
+    if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16){
+      return decision({type:"travel_to",target:"Farm"},"Return to farming","下地干活啦。");
+    }
+    const mustSleep=s.time>=2250||s.energy<=12;
+    const goHome=():Decision=>{
+      if(s.location==="FarmHouse"&&s.bed)return decision({type:"sleep"},"End game day","回床上睡一觉！");
+      const hop=nextHop(s,"FarmHouse");
+      return hop?decision({type:"travel_to",target:hop},"Return home","天晚了，要回家。"):wait("No home route");
+    };
+    if(mustSleep)return goHome();
+    if(s.location!=="Farm"){
+      const hop=nextHop(s,"Farm");
+      return hop?decision({type:"travel_to",target:hop},"Return to farm","回农场看看。"):wait("Farm is unreachable");
+    }
+    const pos={x:s.x,y:s.y};
+    const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
+    const nearest=<T extends Tile>(arr:T[]):T[]=>[...arr].sort((a,b)=>distance(a,pos)-distance(b,pos));
+    const choose=(tiles:Tile[],make:(t:Tile)=>Action,label:string,speech:string):Decision|undefined=>{
+      for(const t of nearest(tiles)){
+        const op=close(pos,t)?make(t):walkNear(s,t);
+        if(can(op))return decision(op,label,speech);
+      }
+      return undefined;
+    };
+    if(s.inventoryFree>0) {
+      const harvest=choose(s.crops.filter(c=>c.ready),t=>({type:"harvest_crop",x:t.x,y:t.y}),"Harvest mature crops","收菜收菜！");
+      if(harvest)return harvest;
+    }
+    const water=choose(s.crops.filter(c=>!c.watered),t=>({type:"water_tile",x:t.x,y:t.y}),"Water dry crops","庄稼渴坏了。");
+    if(water)return water;
+    if(s.seeds.length>0){
+      const seed=s.seeds[0];
+      const plant=choose(s.emptyPlots,t=>({type:"plant_seed",x:t.x,y:t.y,seedId:seed.id}),"Plant available seeds","来种点东西。");
+      if(plant)return plant;
+      // Till one tile only after the existing plot pool has been exhausted.
+      const till=choose(s.tillable,t=>({type:"till_tile",x:t.x,y:t.y}),"Prepare soil","开垦新土地！");
+      if(till)return till;
+    }
+    return goHome();
+  }
+}
+export const mockDecision=(s:GameState)=>new Autopilot().decide(s);
+export function validateAgainstWorld(a:Action,s:GameState):boolean {
+  const here={x:s.x,y:s.y};
+  if(a.type==="wait")return true;
+  if(s.paused)return false;
+  if(a.type==="sleep")return s.location==="FarmHouse"&&s.bed!==null;
+  if(a.type==="travel_to")return s.exits.some(e=>e.target===a.target);
+  if(a.type==="move_to")return a.x>=0&&a.y>=0&&a.x<150&&a.y<150;
+  if(s.location!=="Farm"||!close(here,a))return false;
+  if(a.type==="water_tile")return s.crops.some(c=>c.x===a.x&&c.y===a.y&&!c.watered);
+  if(a.type==="harvest_crop")return s.inventoryFree>0&&s.crops.some(c=>c.x===a.x&&c.y===a.y&&c.ready);
+  if(a.type==="plant_seed")return s.seeds.some(seed=>seed.id===a.seedId&&seed.count>0)&&s.emptyPlots.some(c=>c.x===a.x&&c.y===a.y);
+  if(a.type==="till_tile")return s.tillable.some(t=>t.x===a.x&&t.y===a.y);
+  return false;
 }

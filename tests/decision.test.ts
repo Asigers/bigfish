@@ -1,29 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mockDecision, parseDecision } from "../src/decision.ts";
-import { validState, type GameState } from "../src/types.ts";
-
-const state: GameState={
-  saveId:"test",location:"Farm",day:1,season:"spring",time:610,
-  energy:200,x:2,y:2,paused:false,crops:[{x:4,y:2,watered:false}]
+import { Autopilot,parseDecision,validateAgainstWorld } from "../src/decision.ts";
+import { validState,type GameState } from "../src/types.ts";
+const base:GameState={
+  saveId:"save",location:"Farm",day:1,season:"spring",time:610,energy:200,x:4,y:4,paused:false,
+  crops:[],emptyPlots:[],tillable:[],seeds:[],exits:[{x:6,y:2,target:"FarmHouse"}],
+  worldLinks:[{from:"Farm",to:"FarmHouse"},{from:"FarmHouse",to:"Farm"}],
+  bed:null,inventoryFree:10
 };
-test("parse valid model response",()=>{
-  const d=parseDecision('{"action":{"type":"water_tile","x":5,"y":4},"speech":"hello","reason":"test"}');
-  assert.deepEqual(d.action,{type:"water_tile",x:5,y:4});
+test("no crops or seeds triggers end-of-day travel, not endless waiting",()=>{
+  assert.deepEqual(new Autopilot().decide(base).action,{type:"travel_to",target:"FarmHouse"});
 });
-test("reject prompt-injected invalid tools and coordinates",()=>{
-  assert.throws(()=>parseDecision('{"action":{"type":"shell","cmd":"rm -rf /"}}'));
-  assert.throws(()=>parseDecision('{"action":{"type":"move_to","x":999,"y":4}}'));
-  assert.throws(()=>parseDecision('{"action":{"type":"wait","seconds":600}}'));
+test("plant vacant soil; till soil if none available",()=>{
+  const p=new Autopilot();
+  assert.deepEqual(p.decide({...base,emptyPlots:[{x:5,y:4,watered:false}],seeds:[{id:"(O)472",count:4}]}).action,
+    {type:"plant_seed",x:5,y:4,seedId:"(O)472"});
+  assert.deepEqual(p.decide({...base,tillable:[{x:5,y:4}],seeds:[{id:"(O)472",count:4}]}).action,
+    {type:"till_tile",x:5,y:4});
 });
-test("mock planner moves toward crop then waters",()=>{
-  assert.deepEqual(mockDecision(state).action,{type:"move_to",x:3,y:2});
-  assert.deepEqual(mockDecision({...state,x:3}).action,{type:"water_tile",x:4,y:2});
+test("harvest mature before watering others",()=>{
+  const s={...base,crops:[{x:5,y:4,watered:true,ready:true},{x:3,y:4,watered:false,ready:false}]};
+  assert.deepEqual(new Autopilot().decide(s).action,{type:"harvest_crop",x:5,y:4});
 });
-test("mock planner does not play during menus",()=>{
-  assert.equal(mockDecision({...state,paused:true}).action.type,"wait");
+test("sleep at home and return to farm next morning",()=>{
+  const p=new Autopilot();
+  const home={...base,location:"FarmHouse",bed:{x:5,y:5},time:2300,exits:[{x:3,y:11,target:"Farm"}]};
+  assert.deepEqual(p.decide(home).action,{type:"sleep"});
+  assert.deepEqual(p.decide({...home,day:2,time:610}).action,{type:"travel_to",target:"Farm"});
 });
-test("state validation prevents malformed snapshots",()=>{
-  assert.equal(validState(state),true);
-  assert.equal(validState({...state,crops:[{x:"bad",y:2,watered:false}]}),false);
+test("multi-hop route through Farm to FarmHouse",()=>{
+  const state={...base,location:"BusStop",exits:[{x:1,y:1,target:"Farm"}],
+    worldLinks:[...base.worldLinks,{from:"BusStop",to:"Farm"}],time:2300};
+  assert.deepEqual(new Autopilot().decide(state).action,{type:"travel_to",target:"Farm"});
+});
+test("repeated failed action excluded from next decision",()=>{
+  const p=new Autopilot();
+  const s={...base,crops:[{x:5,y:4,watered:false,ready:false}]};
+  const a=p.decide(s).action;
+  p.observe(s,[{id:"x",ok:false,message:"blocked"}],a);
+  p.observe(s,[{id:"y",ok:false,message:"blocked"}],a);
+  assert.notDeepEqual(p.decide(s).action,a);
+});
+test("reject unsupported model tools, invalid seed id, and invalid state",()=>{
+  assert.throws(()=>parseDecision('{"action":{"type":"shell","cmd":"ls"}}'));
+  assert.throws(()=>parseDecision('{"action":{"type":"plant_seed","x":2,"y":3,"seedId":"../../p"}}'));
+  assert.equal(validState(base),true);
+  assert.equal(validState({...base,emptyPlots:[{x:"bad",y:3,watered:false}]}),false);
+  assert.equal(validateAgainstWorld({type:"plant_seed",x:2,y:2,seedId:"(O)472"},base),false);
+});
+test("accept supported structured actions",()=>{
+  assert.deepEqual(parseDecision('{"action":{"type":"sleep"},"speech":"睡觉","reason":"late"}').action,{type:"sleep"});
+  assert.deepEqual(parseDecision('{"action":{"type":"travel_to","target":"FarmHouse"}}').action,{type:"travel_to",target:"FarmHouse"});
 });
