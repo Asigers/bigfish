@@ -73,3 +73,79 @@ test("OBS serves Live2D scripts, status and preserves SSE without credentials",a
     await bridge.stop();
   }
 });
+
+test("installer retries slow/corrupt downloads, then reuses verified cache",async()=>{
+  const { mkdtemp,writeFile,rm,readFile }=await import("node:fs/promises");
+  const { tmpdir }=await import("node:os");
+  const { join }=await import("node:path");
+  // @ts-ignore: installer is intentionally plain Node ESM.
+  const {downloadVerifiedAsset,blobSha,configFromEnv}=await import("../scripts/install-live2d.mjs");
+  const dir=await mkdtemp(join(tmpdir(),"bigfish-live2d-"));
+  const data=Buffer.from("valid live2d test asset");
+  const asset={path:"model/sample.json",sha:blobSha(data),size:data.length};
+  try {
+    let calls=0;
+    const state=await downloadVerifiedAsset(asset,dir,{
+      attempts:3,delayMs:1,timeoutSeconds:30,
+      downloader:async (_url:string,destination:string)=>{
+        calls++;
+        if(calls===1)throw Error("TimeoutError");
+        if(calls===2)await writeFile(destination,"corrupt data");
+        else await writeFile(destination,data);
+      }
+    });
+    assert.equal(state,"downloaded");
+    assert.equal(calls,3);
+    assert.deepEqual(await readFile(join(dir,"model","sample.json")),data);
+    const reuse=await downloadVerifiedAsset(asset,dir,{
+      attempts:1,
+      downloader:async()=>{throw Error("Cached asset must not download again");}
+    });
+    assert.equal(reuse,"cached");
+    assert.deepEqual(configFromEnv({
+      BIGFISH_DOWNLOAD_TIMEOUT:"180",BIGFISH_DOWNLOAD_RETRIES:"6",BIGFISH_DOWNLOAD_CONCURRENCY:"1"
+    }),{timeoutSeconds:180,attempts:6,concurrency:1});
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("successful downloads survive a later batch failure and resume from cache",async()=>{
+  const {mkdtemp,mkdir,rm,readFile,writeFile}=await import("node:fs/promises");
+  const {tmpdir}=await import("node:os");
+  const {join}=await import("node:path");
+  // @ts-ignore: installer is intentionally plain Node ESM.
+  const {prepareAssets,blobSha}=await import("../scripts/install-live2d.mjs");
+  const dir=await mkdtemp(join(tmpdir(),"bigfish-resume-"));
+  const a=Buffer.from("first asset");
+  const b=Buffer.from("second asset");
+  const assets=[
+    {path:"model/a.json",sha:blobSha(a),size:a.length},
+    {path:"model/b.json",sha:blobSha(b),size:b.length},
+  ];
+  const cacheRoot=join(dir,"cache"),outputRoot=join(dir,"installed");
+  const stageRoot=join(dir,"stage");
+  const files=new Map<string,Buffer>([["a.json",a],["b.json",b]]);
+  try{
+    await mkdir(stageRoot);
+    await assert.rejects(prepareAssets(assets,{
+      cacheRoot,outputRoot,stageRoot,attempts:1,concurrency:1,delayMs:1,
+      downloader:async (url:string,dest:string)=>{
+        if(url.includes("b.json"))throw Error("simulated network timeout");
+        await writeFile(dest,files.get("a.json")!);
+      }
+    }),/simulated network timeout/);
+    assert.deepEqual(await readFile(join(cacheRoot,"model","a.json")),a);
+    const retryStage=join(dir,"retryStage");await mkdir(retryStage);
+    let requestedFirst=false;
+    const result=await prepareAssets(assets,{
+      cacheRoot,outputRoot,stageRoot:retryStage,attempts:2,concurrency:1,delayMs:1,
+      downloader:async (url:string,dest:string)=>{
+        if(url.includes("a.json"))requestedFirst=true;
+        await writeFile(dest,files.get(url.includes("a.json")?"a.json":"b.json")!);
+      }
+    });
+    assert.equal(requestedFirst,false,"previously verified asset was downloaded twice");
+    assert.equal(result.completed,2);
+    assert.equal(result.cached,1);
+    assert.deepEqual(await readFile(join(retryStage,"model","b.json")),b);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
