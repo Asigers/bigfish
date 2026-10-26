@@ -574,7 +574,16 @@ public sealed class ModEntry : Mod
 
     private async Task PostStateAsync(object snapshot)
     {
-        try { using var res = await client!.PostAsJsonAsync("/state", snapshot); res.EnsureSuccessStatusCode(); }
+        try
+        {
+            using var res = await client!.PostAsJsonAsync("/state", snapshot);
+            if (!res.IsSuccessStatusCode)
+            {
+                var details = await res.Content.ReadAsStringAsync();
+                Monitor.Log("State sync rejected (HTTP " + (int)res.StatusCode + "): " +
+                    details.Substring(0, Math.Min(details.Length, 1200)), LogLevel.Warn);
+            }
+        }
         catch (Exception ex) { Monitor.Log("State sync failed: " + ex, LogLevel.Warn); }
         finally { posting = false; }
     }
