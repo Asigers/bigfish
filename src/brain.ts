@@ -32,7 +32,7 @@ export class PiBrain {
     const {session} = await sdk.createAgentSession({
       cwd,
       resourceLoader,
-      noTools: true,
+      noTools: "all",
       tools: [],
       sessionManager: sdk.SessionManager.inMemory(cwd),
       settingsManager: sdk.SettingsManager.inMemory({ retry: {enabled:false}, compaction: {enabled:true} })
