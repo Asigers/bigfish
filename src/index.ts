@@ -54,6 +54,8 @@ async function run():Promise<void> {
       else{
         const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:15000;
         result=await bridge.send(action,timeout);
+        // Request a snapshot posted AFTER the result, never blindly reuse stale farm data.
+        await bridge.waitForNextState(bridge.getStateSequence(), 6000);
         recent.push(result);
         if(recent.length>8)recent.shift();
         console.log("[game]",result.ok?"ok":"failed",result.message);

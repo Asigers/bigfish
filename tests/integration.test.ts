@@ -27,6 +27,7 @@ test("simulator completes farming, planting, tilling, harvesting and advances to
       if(decision.action.type==="wait"){await new Promise(r=>setTimeout(r,100));continue;}
       types.add(decision.action.type);
       const result=await bridge.send(decision.action,4000);
+      await bridge.waitForNextState(bridge.getStateSequence(),4000);
       planner.observe(state,[result],decision.action);
       assert.equal(result.ok,true,result.message+" for "+JSON.stringify(decision.action));
       await new Promise(r=>setTimeout(r,90));

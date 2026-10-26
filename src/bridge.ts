@@ -7,6 +7,7 @@ export class GameBridge {
   private server:Server|undefined;
   private state:GameState|undefined;
   private stateAt=0;
+  private stateSequence=0;
   private pending:Pending|undefined;
   private events:ViewerEvent[]=[];
   readonly token:string;
@@ -43,7 +44,7 @@ export class GameBridge {
         if(req.url==="/state"&&req.method==="POST"){
           const state=await this.body(req);
           if(!validState(state))return this.reply(res,400,{error:"invalid state"});
-          this.state=state;this.stateAt=Date.now();
+          this.state=state;this.stateAt=Date.now();this.stateSequence++;
           return this.reply(res,200,{ok:true});
         }
         if(req.url==="/next"&&req.method==="GET")
@@ -76,6 +77,16 @@ export class GameBridge {
     return address.port;
   }
   getState():GameState|undefined{return Date.now()-this.stateAt<4000?this.state:undefined;}
+  getStateSequence():number{return this.stateSequence;}
+  async waitForNextState(afterSequence:number,timeoutMs=5000):Promise<GameState>{
+    const deadline=Date.now()+timeoutMs;
+    while(Date.now()<deadline){
+      const state=this.getState();
+      if(state && this.stateSequence>afterSequence)return state;
+      await new Promise<void>(resolve=>setTimeout(resolve,50));
+    }
+    throw Error("No fresh game state after command completion");
+  }
   drainEvents():ViewerEvent[]{return this.events.splice(0);}
   send(action:Exclude<Action,{type:"wait"}>,timeoutMs=15000):Promise<ActionResult>{
     if(this.pending)return Promise.reject(Error("A command is already pending"));
