@@ -20,7 +20,8 @@ export function parseStrategy(raw:string):Strategy{
 }
 export class GoalMemory{
   private journal:Journal|undefined;
-  constructor(readonly storagePath=path){}
+  readonly storagePath:string;
+  constructor(storagePath=path){this.storagePath=storagePath;}
   async load():Promise<void>{
     try{
       const value:unknown=JSON.parse(await readFile(this.storagePath,"utf8"));
