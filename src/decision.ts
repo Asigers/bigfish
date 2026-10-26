@@ -64,23 +64,37 @@ export function parseDecision(raw:string):Decision {
 export class Autopilot {
   private failures=new Map<string,number>();
   private prevDay="";
+  private endingDay=false;
+  private syncDay(s:GameState):void {
+    const dayKey=s.saveId+":"+s.season+":"+s.day;
+    if(this.prevDay!==dayKey){
+      this.failures.clear();
+      this.endingDay=false;
+      this.prevDay=dayKey;
+    }
+  }
   observe(s:GameState,recent:ActionResult[],action?:Action):void {
-    const dayKey=s.saveId+":"+s.day;
-    if(this.prevDay!==dayKey){this.failures.clear();this.prevDay=dayKey;}
+    this.syncDay(s);
     if(action&&recent.length&&!recent.at(-1)!.ok){
       const k=s.location+":"+actionKey(action);
       this.failures.set(k,(this.failures.get(k)??0)+1);
     }
   }
   decide(s:GameState):Decision {
+    this.syncDay(s);
     if(s.paused)return wait("Game menu or cutscene active");
     const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
+    const mustSleep=s.time>=2250||s.energy<=12;
+    if(s.location==="FarmHouse" && (this.endingDay||mustSleep) && s.bed){
+      const action:Action={type:"sleep"};
+      return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
+    }
     if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16){
       const action:Action={type:"travel_to",target:"Farm"};
       return can(action)?decision(action,"Return to farming","下地干活啦。"):wait("Farm commute repeatedly failed");
     }
-    const mustSleep=s.time>=2250||s.energy<=12;
     const goHome=():Decision=>{
+      this.endingDay=true;
       if(s.location==="FarmHouse"&&s.bed){
         const action:Action={type:"sleep"};
         return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
