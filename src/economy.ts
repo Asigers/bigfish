@@ -38,10 +38,11 @@ export class EconomyPlanner {
   private failed=new Map<string,number>();
   private dayKey="";
   private shopAttempted=false;
+  private errand: "buy"|null=null;
   private cashAfterShipping=false;
   update(s:GameState,action?:Action,ok=true):void {
     const k=s.saveId+":"+s.season+":"+s.day;
-    if(this.dayKey!==k){this.failed.clear();this.shopAttempted=false;this.cashAfterShipping=false;this.dayKey=k;}
+    if(this.dayKey!==k){this.failed.clear();this.shopAttempted=false;this.errand=null;this.cashAfterShipping=false;this.dayKey=k;}
     if(action&&!ok)this.failed.set(s.location+":"+actionKey(action),(this.failed.get(s.location+":"+actionKey(action))??0)+1);
     if(action?.type==="buy_seed"&&ok)this.shopAttempted=true;
   }
@@ -77,6 +78,11 @@ export class EconomyPlanner {
           }
         }
       }
+      if(s.crops.some(c=>!c.watered) && e.tools.wateringCan && e.tools.waterLeft===0 && s.waterSources?.length){
+        const spring=[...s.waterSources].sort((a,b)=>dist(a,s)-dist(b,s))[0];
+        const a=interact(spring,{type:"refill_watering_can",x:spring.x,y:spring.y},"Fill watering can","水壶空了，先去打水！");
+        if(a)return a;
+      }
       // Free inventory using storage for non-saleable non-tool resources.
       if(s.inventoryFree<=1&&e.chests.length){
         const resources=e.bag.filter(x=>x.category!==-74&&!x.sellable&&x.category!==-99&&x.id.startsWith("(O)"));
@@ -90,8 +96,11 @@ export class EconomyPlanner {
       const workPending=s.crops.some(c=>!c.watered||c.ready) || (seedCount>0&&s.emptyPlots.length>0);
       if(!workPending&&seedCount<strategy.seedReserve&&e.gold>=30&&s.time>=830&&s.time<1530&&!this.shopAttempted){
         const step=travel("SeedShop","Buy next batch of seeds","去皮埃尔那儿补货！");
-        if(step)return step;
+        if(step){this.errand="buy";return step;}
       }
+    }
+    if(this.errand==="buy"&&s.location!=="Farm"&&s.location!=="SeedShop"){
+      return travel("SeedShop","Continue seed-shopping route","去商店的路上。");
     }
     if(s.location==="SeedShop"){
       const shop=e.shop;
@@ -99,8 +108,10 @@ export class EconomyPlanner {
         const exit=travel("Farm","Shop is closed or keeper absent","商店不开门，先回家。");
         return exit;
       }
-      if(seedCount>=strategy.seedReserve || this.shopAttempted || e.gold<30)
+      if(seedCount>=strategy.seedReserve || this.shopAttempted || e.gold<30){
+        this.errand=null;
         return travel("Farm","Return with purchased seeds","带着种子回农场！");
+      }
       const stock=[...shop.offers].filter(x=>x.price>0&&x.price<=e.gold&&x.stock!==0).sort((a,b)=>a.price-b.price);
       // Spend at most half of current cash on one buying batch; preserve emergency funds.
       const offer=stock[0];
@@ -112,6 +123,7 @@ export class EconomyPlanner {
           if(a)return a;
         }
       }
+      this.errand=null;
       return travel("Farm","No affordable seed offers","今天种子买不起了。");
     }
   }

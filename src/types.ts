@@ -18,7 +18,7 @@ export type GameState = {
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
   seeds: SeedStack[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
-  economy?: EconomyState;
+  economy?: EconomyState; waterSources?: Tile[];
 };
 export type Action =
   | { type: "move_to" | "water_tile" | "harvest_crop" | "till_tile"; x: number; y: number }
@@ -28,6 +28,7 @@ export type Action =
   | { type: "buy_seed"; itemId: string; count: number }
   | { type: "store_item" | "withdraw_item"; x: number; y: number; itemId: string; count: number }
   | { type: "equip_tool"; tool: "hoe" | "watering_can" }
+  | { type: "refill_watering_can"; x: number; y: number }
   | { type: "sleep" }
   | { type: "wait"; seconds: number };
 export type Command = Exclude<Action, { type: "wait" }> & { id: string; saveId: string; day: number; location: string };
@@ -55,7 +56,8 @@ export function validState(input: unknown): input is GameState {
     && Array.isArray(s.exits) && s.exits.length <= 50 && s.exits.every(c=>coordinate(c)&&locName(c.target))
     && Array.isArray(s.worldLinks) && s.worldLinks.length <= 300 && s.worldLinks.every(c=>record(c)&&locName(c.from)&&locName(c.to))
     && (s.bed === null || coordinate(s.bed))
-    && (s.economy === undefined || validEconomy(s.economy));
+    && (s.economy === undefined || validEconomy(s.economy))
+    && (s.waterSources === undefined || (Array.isArray(s.waterSources)&&s.waterSources.length<=80&&s.waterSources.every(coordinate)));
 }
 export function actionKey(a: Action): string { return JSON.stringify(a); }
 
