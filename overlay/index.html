@@ -28,11 +28,13 @@
 #avatar[data-emotion=surprised] #mouth-open{opacity:1}
 #avatar[data-speaking=true]{animation-duration:1s}
 #avatar[data-speaking=true] #mouth-rest{animation:talk .32s steps(2) infinite}
+#avatar[data-speaking=true] #mouth-open{animation:openTalk .32s steps(2) infinite}
 #avatar[data-emotion=excited]{animation:bounce .7s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-16px)}}
 @keyframes wag{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(13deg)}}
 @keyframes talk{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes openTalk{0%,100%{opacity:0}50%{opacity:1}}
 @keyframes bubble{0%,100%{opacity:0;transform:translateY(5px)}35%{opacity:.9}85%{transform:translateY(-25px)}}
 @media(max-width:900px){#stage{right:20px;bottom:20px}#avatar{width:180px;height:150px}#speech{font-size:16px}}
 </style></head>
