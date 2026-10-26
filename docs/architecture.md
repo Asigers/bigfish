@@ -1,41 +1,49 @@
-# BigFish v0.1 architecture
+# BigFish architecture — v0.2
 
-## Purpose
+## Modules and responsibility
 
-The goal is to verify a fully autonomous decision loop on macOS against a real SMAPI game bridge. This is not a full Stardew Valley autoplayer or a complete streaming integration.
+- **Autopilot** (`src/decision.ts`): deterministic minimum viable farm-day progression, high-level phase state, failure blacklist. Owns the day's `endingDay` intention until the next day is observed.
+- **PiBrain** (`src/brain.ts`): Pi SDK restricted no-tools session, Chinese character speech and action proposals. Model cannot replace a mandatory objective with arbitrary waiting or detours.
+- **Controller** (`src/index.ts`): one action at a time, validates against current world state, waits for HTTP acknowledgement **and a later state snapshot**, triggers cooldown on failure.
+- **Bridge** (`src/bridge.ts`): localhost-only authenticated HTTP server. Commands carry `id`, `saveId`, `day` and `location`.
+- **SMAPI Mod** (`mods/BigFishBridge/ModEntry.cs`): does game API work on the main tick, sends serialized state asynchronously; uses built-in crop planting/harvesting and bed sleep action.
+- **Simulator** (`src/simulator.ts`): fake two-room farm with plant/harvest/till/water/travel/sleep effects, useful for regression tests.
 
-## Components
+## Local API
 
-- Pi SDK session: JSON-only plans from observed state; no built-in tools or user extensions.
-- TypeScript controller: validates allowlisted decisions, enforces one in-flight command and 15-second timeout, maintains a short recent-result window.
-- HTTP bridge: local 127.0.0.1 and shared random token; snapshots arrive from game, commands polled by the mod, results reported separately.
-- SMAPI C# mod: all game API calls occur on the game update thread; network requests are asynchronous.
-- Simulator: fake farm runs the same HTTP command protocol without Stardew Valley or model credentials.
+All except `GET /health` require `x-bigfish-token`.
 
-## Protocol
+- `POST /state`: structured snapshot with crops (ready, watered), empty plots, tillable tiles, inventory seeds, exits/world graph, bed tile, energy, save/day/location.
+- `GET /next`: one pending command or null.
+- `POST /result`: result for exact command UUID.
+- `POST /event`: unverified mock viewer message; not a platform webhook.
+- `GET /health`: recent heartbeat.
 
-All routes except GET /health require header x-bigfish-token.
+The game-side Mod rejects commands for a stale day, save or source location. After each acknowledgement, the controller **must wait for another state snapshot** before the next decision.
 
-- POST /state: GameState JSON. Game reports every 40 ticks.
-- GET /next: {command:null} or {command:{id,type,x,y}}. Poll repeatedly. Single in-flight command.
-- POST /result: {id,ok,message}. Matching ID resolves the command.
-- POST /event: {kind:'chat'|'gift',user,text}. Optional manually injected viewer events; no platform integration or real gift effects.
-- GET /health: {ok,connected} where connected means a recent state heartbeat (within 4 seconds).
+## Allowed actions
 
-Commands are idempotently ignored by the mod when the command ID repeats. The state is scoped to a local game and only the current player.
+`move_to`, `till_tile`, `plant_seed`, `water_tile`, `harvest_crop`, `travel_to`, `sleep`, `wait`.
 
-## Design boundaries
+All tiles are bounded and mod-side actions enforce proximity, crop/soil/inventory preconditions and actual connected exits. `sleep` requires the farmhouse, a real bed and the host player. An all-day failure blacklist prevents repeated failed commands from being issued indefinitely.
 
-- Movement delegates to Stardew Valley PathFindController. It may not navigate every farm arrangement or map.
-- Watering is a direct HoeDirt.state prototype (no tool animation or water consumption). Do not use on your main save.
-- No auto-planting, harvesting, mining, fishing, sleeping or warps in v0.1.
-- The model may make bad plans. Parsing and game-side checks prevent arbitrary commands, but do not guarantee successful gameplay.
-- Events are untrusted input: not instructions and not platform-verified rewards.
-- Long-running reliability, task persistence, OBS, voice, avatar, Bilibili open platform and paid-gift integration are future milestones.
+### Why two AI layers?
 
-## Next milestones
+The deterministic controller handles low-level timing, progress and correctness (the Pi model isn't called per frame). Pi creates optional personality/dialogue and can select feasible alternate targets inside the same task phase. It does not grant cheats or change any arbitrary game state.
 
-1. Local Mac build + smoke test of pathfinder and crop enumeration on supported Stardew/SMAPI versions.
-2. True tool-driven farming: tool activation, energy costs, inventory, blocked-tile-aware routing and animation.
-3. Progress goals: plant/harvest/sleep with save persistence, fault recovery and session memory.
-4. Stream overlay + TTS + official live event access and consent-based gift mapping.
+## Caveats before unattended operation
+
+1. **No game-dependent C# CI**: Stardew game assemblies are not bundled. Need `dotnet build` locally on macOS and in-game smoke test; Node CI is not equivalent.
+2. **No true tool simulation yet**: watering/tilling mutate game soil state; replace with built-in tool-use/animation and stamina consumption after SMAPI gameplay verification.
+3. **Seed supply limited**: the model can't buy seeds or withdraw chest items. The current finite-resource loop intentionally sleeps when out of available tasks.
+4. **Travel only via mapped exit**: some doors use map actions instead of entries in `warps`; special farmhouse fallback included. No unrestricted teleport API.
+5. **Multi-step command uncertainty**: if a command times out after game-side progress, the caller may need a result reconciliation; true distributed cancellation/reconciliation remains to be implemented.
+6. **UI/event limitations**: only local mock viewer messages; no platform-verified gifts, avatar, audio or stream overlay.
+7. **Not multiplayer safe**: only use a local single-player backed-up save.
+
+## Next implementation milestones
+
+- Mac game + SMAPI 4.5.x build/load and movement/bed/warp smoke tests.
+- Replace tilling and watering prototypes with actual hoe and watering-can use.
+- Implement inventory management, purchase seeds, chest access and selling crops.
+- Add persistent task state, precise action cancellation, detailed streaming observability and human takeover.
