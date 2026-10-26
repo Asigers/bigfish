@@ -20,7 +20,7 @@ test("asset installer selects only supported model and pinned runtimes",async()=
   const { selectAssets,blobSha,safeAssetPath } = await import("../scripts/install-live2d.mjs");
   const selected=selectAssets(mockTree);
   assert.equal(selected.length,7);
-  assert.ok(selected.some(x=>x.path==="model/expressions/开心兴奋.exp3.json"));
+  assert.ok(selected.some((x:{path:string})=>x.path==="model/expressions/开心兴奋.exp3.json"));
   assert.equal(safeAssetPath("model/../secrets.json"),false);
   assert.equal(safeAssetPath("vendor/other.js"),false);
   assert.equal(blobSha(Buffer.from("test")),"30d74d258442c7c65512eafab474568dd706c430");
