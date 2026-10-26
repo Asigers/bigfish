@@ -65,7 +65,7 @@ export function validEconomy(value:unknown):value is EconomyState {
   if(!record(value))return false;
   const e=value as unknown as EconomyState;
   const bag=(x:unknown):x is BagItem=>record(x)&&typeof x.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(x.id)
-    && Number.isInteger(x.count)&&x.count>0&&x.count<=9999&&Number.isInteger(x.category)&&typeof x.sellable==="boolean";
+    && typeof x.count==="number"&&Number.isInteger(x.count)&&x.count>0&&x.count<=9999&&Number.isInteger(x.category)&&typeof x.sellable==="boolean";
   return Number.isInteger(e.gold)&&e.gold>=0&&e.gold<100_000_000
     && Array.isArray(e.bag)&&e.bag.length<=60&&e.bag.every(bag)
     && Array.isArray(e.chests)&&e.chests.length<=40&&e.chests.every(c=>coordinate(c)&&Array.isArray(c.items)&&c.items.length<=100&&c.items.every(bag))
