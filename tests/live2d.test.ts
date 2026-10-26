@@ -23,7 +23,7 @@ test("asset installer selects only supported model and pinned runtimes",async()=
   assert.ok(selected.some(x=>x.path==="model/expressions/开心兴奋.exp3.json"));
   assert.equal(safeAssetPath("model/../secrets.json"),false);
   assert.equal(safeAssetPath("vendor/other.js"),false);
-  assert.equal(blobSha(Buffer.from("test")),"30d74d258442c7c65512eafab474568dd706c430c");
+  assert.equal(blobSha(Buffer.from("test")),"30d74d258442c7c65512eafab474568dd706c430");
 });
 test("public overlay asset routing denies traversal and arbitrary files",async()=>{
   assert.equal(allowedAsset("model/expressions/开心兴奋.exp3.json"),true);
