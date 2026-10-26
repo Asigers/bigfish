@@ -1,85 +1,46 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BigFish · OBS 透明数字鱼</title>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BigFish · DeepSeek 鲸鱼娘 Live2D OBS</title>
 <style>
-:root{--navy:#122c45;--blue:#3288d0;--light:#8ed8f5;--white:#f8fdff}
-*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-#stage{position:fixed;right:36px;bottom:34px;width:min(520px,34vw);min-width:290px;display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}
-#speech{background:rgba(9,27,47,.92);color:#fff;box-shadow:0 10px 30px #0b24443d;border:1px solid #a2c9e460;border-radius:18px 18px 5px 18px;padding:14px 18px;font-weight:650;font-size:clamp(16px,1.36vw,23px);line-height:1.45;max-width:100%;text-wrap:pretty;opacity:0;transform:translateY(12px);transition:.32s;word-break:break-word}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+#stage{position:fixed;right:26px;bottom:23px;width:min(500px,36vw);min-width:270px;display:flex;align-items:flex-end;flex-direction:column;pointer-events:none}
+#speech{max-width:92%;background:rgba(13,32,55,.93);border:1px solid rgba(158,212,255,.43);color:#f6fcff;
+  font-size:clamp(16px,1.22vw,23px);line-height:1.52;font-weight:620;border-radius:18px 18px 5px 18px;
+  padding:14px 17px;margin-right:14px;margin-bottom:3px;box-shadow:0 10px 25px #06172860;
+  opacity:0;transform:translateY(10px);transition:opacity .25s,transform .25s;overflow-wrap:anywhere}
 #speech.visible{opacity:1;transform:translateY(0)}
-#identity{display:flex;align-items:center;gap:9px;color:#f9ffff;font-size:12px;letter-spacing:.06em;background:#153954e3;border-radius:30px;padding:6px 12px;border:1px solid #9dd8eb66}
-#identity .dot{width:7px;height:7px;border-radius:50%;background:#86f7be;box-shadow:0 0 9px #86f7be}
-#avatar{position:relative;width:240px;height:195px;filter:drop-shadow(0px 12px 16px #14243873);transform-origin:50% 80%;animation:bob 3.5s ease-in-out infinite}
-#avatar svg{width:100%;height:100%;overflow:visible}
-#tail{transform-origin:74% 50%;animation:wag 1.5s ease-in-out infinite}
-#blush{opacity:0;transition:opacity .2s}#eyes-smile{opacity:0}#eyes-sad{opacity:0}#mouth-open{opacity:0}
-#bubble{opacity:0;animation:bubble 4s ease-in-out infinite}
-#avatar[data-emotion=happy] #blush,#avatar[data-emotion=excited] #blush{opacity:1}
-#avatar[data-emotion=happy] #eyes-normal,#avatar[data-emotion=excited] #eyes-normal{opacity:0}
-#avatar[data-emotion=happy] #eyes-smile,#avatar[data-emotion=excited] #eyes-smile{opacity:1}
-#avatar[data-emotion=excited] #mouth-rest{opacity:0}
-#avatar[data-emotion=excited] #mouth-open{opacity:1}
-#avatar[data-emotion=sad] #eyes-normal{opacity:0}
-#avatar[data-emotion=sad] #eyes-sad{opacity:1}
-#avatar[data-emotion=tired]{animation-duration:6s;filter:brightness(.85) drop-shadow(0px 12px 16px #14243873)}
-#avatar[data-emotion=thinking]{transform:rotate(-7deg)}
-#avatar[data-emotion=surprised] #mouth-rest{opacity:0}
-#avatar[data-emotion=surprised] #mouth-open{opacity:1}
-#avatar[data-speaking=true]{animation-duration:1s}
-#avatar[data-speaking=true] #mouth-rest{animation:talk .32s steps(2) infinite}
-#avatar[data-speaking=true] #mouth-open{animation:openTalk .32s steps(2) infinite}
-#avatar[data-emotion=excited]{animation:bounce .7s ease-in-out infinite}
-@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-16px)}}
-@keyframes wag{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(13deg)}}
-@keyframes talk{0%,100%{opacity:1}50%{opacity:0}}
-@keyframes openTalk{0%,100%{opacity:0}50%{opacity:1}}
-@keyframes bubble{0%,100%{opacity:0;transform:translateY(5px)}35%{opacity:.9}85%{transform:translateY(-25px)}}
-@media(max-width:900px){#stage{right:20px;bottom:20px}#avatar{width:180px;height:150px}#speech{font-size:16px}}
-</style></head>
-<body><div id="stage" role="presentation">
+#identity{align-self:flex-end;margin-right:24px;border-radius:30px;padding:7px 13px;color:#e5faff;
+  border:1px solid rgba(163,213,245,.42);background:rgba(8,32,53,.83);
+  font-size:12px;max-width:88%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#identity::before{content:"";display:inline-block;width:7px;height:7px;background:#70e6af;box-shadow:0 0 8px #70e6af;border-radius:50%;margin-right:8px}
+#avatar{height:min(455px,40vw);width:100%;min-height:260px;position:relative;overflow:hidden;transform-origin:center bottom}
+#live2d-canvas{height:100%;width:100%}
+#missing{position:absolute;bottom:10px;right:6px;max-width:410px;background:rgba(12,31,51,.93);color:#e3f3fa;
+  border:1px solid #7eaecd88;border-radius:13px;padding:15px;font-size:14px;line-height:1.7;pointer-events:auto}
+#missing code{font-size:12px;word-break:break-all;color:#b7e6fc}
+#credits{color:#c6e5fa;background:#12344b98;font-size:10px;border-radius:7px;padding:3px 7px;margin-top:-2px;margin-right:12px;max-width:96%;text-align:right}
+#credits a{color:inherit}
+body[data-mode=preview] #stage{right:26px;bottom:26px}
+@media(max-width:900px){#stage{right:12px;bottom:12px}#avatar{height:340px}#speech{font-size:16px}}
+</style>
+</head>
+<body><div id="stage">
   <div id="speech" aria-live="polite"></div>
-  <div id="identity"><span class="dot"></span><span id="goal">大肥鱼 · 自主游戏中</span></div>
-  <div id="avatar" data-emotion="idle" data-speaking="false" role="img" aria-label="蓝色的大肥鱼数字主播">
-    <svg viewBox="0 0 300 240" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs><linearGradient id="fish" x1="0" x2=".9" y1="0" y2="1"><stop stop-color="#76c9ee"/><stop offset=".48" stop-color="#4099d9"/><stop offset="1" stop-color="#2269af"/></linearGradient>
-      <linearGradient id="belly" x1="0" x2=".3" y1="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#d8f4ff"/></linearGradient></defs>
-      <g id="tail"><path d="M208 128 Q270 62 285 76 Q279 123 262 139 Q285 160 282 205 Q244 196 206 156Z" fill="#277abd" stroke="#173f6c" stroke-width="4" stroke-linejoin="round"/></g>
-      <path d="M114 85 Q143 23 173 74 L183 108Z" fill="#2686c8" stroke="#174875" stroke-width="4"/>
-      <path d="M103 155 Q37 184 41 216 Q111 223 135 167" fill="#2a84c9" stroke="#174875" stroke-width="4"/>
-      <path d="M26 123 C24 69 75 42 137 56 C195 58 235 93 231 146 C228 207 169 224 112 218 C48 209 22 176 26 123Z" fill="url(#fish)" stroke="#163e6b" stroke-width="5"/>
-      <path d="M28 145 C44 184 81 203 124 203 C170 204 210 180 226 148 C218 202 168 219 115 217 C68 212 39 187 28 145Z" fill="url(#belly)" opacity=".97"/>
-      <path d="M208 157 Q242 159 245 177 Q225 185 197 168" fill="#57b4e7" stroke="#174875" stroke-width="4"/>
-      <g id="eyes-normal"><ellipse cx="84" cy="113" rx="7.5" ry="11.5" fill="#102d4f"/><ellipse cx="173" cy="113" rx="7.5" ry="11.5" fill="#102d4f"/><circle cx="81" cy="109" r="2.3" fill="#fff"/><circle cx="170" cy="109" r="2.3" fill="#fff"/></g>
-      <g id="eyes-smile" fill="none" stroke="#13395e" stroke-width="6" stroke-linecap="round"><path d="M71 115 Q83 102 95 115"/><path d="M160 115 Q172 102 184 115"/></g>
-      <g id="eyes-sad" fill="none" stroke="#13395e" stroke-width="5" stroke-linecap="round"><path d="M71 112 Q83 121 95 112"/><path d="M160 112 Q172 121 184 112"/></g>
-      <g id="blush" fill="#f5a4b2" opacity=".65"><ellipse cx="60" cy="142" rx="19" ry="8"/><ellipse cx="194" cy="142" rx="19" ry="8"/></g>
-      <path id="mouth-rest" d="M119 149 Q134 158 150 149" fill="none" stroke="#183e60" stroke-width="5" stroke-linecap="round"/>
-      <ellipse id="mouth-open" cx="135" cy="151" rx="13" ry="10" fill="#20425e"/>
-      <g id="bubble" fill="none" stroke="#c9f6ff" stroke-width="3"><circle cx="207" cy="51" r="9"/><circle cx="229" cy="32" r="5"/></g>
-      <circle cx="55" cy="91" r="6" fill="#fff" opacity=".24"/><circle cx="68" cy="80" r="3" fill="#fff" opacity=".33"/>
-    </svg>
+  <div id="identity">大肥鱼 · 自主游戏中</div>
+  <div id="avatar" data-emotion="idle" data-speaking="false" role="img" aria-label="DeepSeek 鲸鱼娘 Live2D 直播角色">
+    <div id="live2d-canvas"></div>
+    <div id="missing" hidden>
+      <strong>尚未安装鲸鱼娘 Live2D 模型</strong>
+      <div>在 BigFish 目录执行：</div>
+      <code>npm run live2d:install -- --acknowledge-noncommercial</code>
+      <div>随后重启服务或刷新 OBS 浏览器源。</div>
+    </div>
   </div>
+  <div id="credits">角色：上善无形 · ZipZipPipe · 氵六青 ｜ <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh">CC BY-NC-SA 4.0</a></div>
 </div>
-<script>
-"use strict";
-const fish=document.querySelector("#avatar");
-const speech=document.querySelector("#speech");
-const goal=document.querySelector("#goal");
-const known=new Set(["idle","happy","excited","thinking","tired","sad","surprised"]);
-let hide;
-function say(event){
-  const emotion=known.has(event.emotion)?event.emotion:"idle";
-  fish.dataset.emotion=emotion;fish.dataset.speaking="true";
-  speech.textContent=String(event.text||"").slice(0,120);
-  goal.textContent="大肥鱼 · "+String(event.goal||"自主游戏中").slice(0,60);
-  speech.classList.add("visible");
-  clearTimeout(hide);
-  hide=setTimeout(()=>{speech.classList.remove("visible");fish.dataset.speaking="false";fish.dataset.emotion="idle";},Math.min(12000,4500+speech.textContent.length*125));
-}
-const stream=new EventSource("/overlay/events");
-stream.addEventListener("speech",e=>{try{say(JSON.parse(e.data))}catch{}});
-stream.onerror=()=>{goal.textContent="大肥鱼 · 等待连接";};
-stream.onopen=()=>{goal.textContent="大肥鱼 · 自主游戏中";};
-</script></body></html>
+<script src="/overlay/live2d.js"></script>
+</body></html>
