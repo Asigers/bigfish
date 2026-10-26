@@ -74,11 +74,11 @@ export class Autopilot {
   }
   decide(s:GameState):Decision {
     if(s.paused)return wait("Game menu or cutscene active");
+    const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
     if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16){
       const action:Action={type:"travel_to",target:"Farm"};
       return can(action)?decision(action,"Return to farming","下地干活啦。"):wait("Farm commute repeatedly failed");
     }
-    const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
     const mustSleep=s.time>=2250||s.energy<=12;
     const goHome=():Decision=>{
       if(s.location==="FarmHouse"&&s.bed){
