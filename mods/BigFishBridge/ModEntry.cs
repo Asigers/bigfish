@@ -49,6 +49,7 @@ public sealed class ModEntry : Mod
     private Warp? activeExit;
     private bool sleeping;
     private List<Point>? cachedWaterSources;
+    private readonly HashSet<string> reportedInvalidExitLocations = new();
 
     public override void Entry(IModHelper helper)
     {
@@ -143,6 +144,17 @@ public sealed class ModEntry : Mod
             yield return new Warp(inner.X, inner.Y, "Farm", outer.X, outer.Y + 1, false);
     }
 
+    // The Node bridge accepts only bounded coordinates and simple map identifiers.
+    // Some map warps are off-map placeholders and must not poison the entire snapshot.
+    private static bool ValidMapName(string? name) =>
+        !string.IsNullOrEmpty(name) && name.Length <= 80 &&
+        name.All(c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-');
+
+    private static bool ValidNavigableExit(Warp warp) =>
+        warp.X >= 0 && warp.Y >= 0 && warp.X < 256 && warp.Y < 256 &&
+        ValidMapName(warp.TargetName);
+
     private object Snapshot()
     {
         var player = Game1.player;
@@ -203,10 +215,17 @@ public sealed class ModEntry : Mod
             .Take(60)
             .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack) })
             .ToArray();
-        var exits = Exits(loc).Where(w => w.TargetName != null)
+        var rawExits = Exits(loc).Take(100).ToArray();
+        var invalidExits = rawExits.Count(w => !ValidNavigableExit(w));
+        if (invalidExits > 0 && reportedInvalidExitLocations.Add(loc.Name))
+            Monitor.Log("Skipping " + invalidExits + " invalid/off-map warp(s) in " + loc.Name,
+                LogLevel.Warn);
+        var exits = rawExits.Where(ValidNavigableExit)
             .Take(50).Select(w => new { x = w.X, y = w.Y, target = w.TargetName }).ToArray();
-        var links = Game1.locations.SelectMany(l => Exits(l).Select(w => new { from = l.Name, to = w.TargetName }))
-            .Where(l => l.to != null).Take(300).ToArray();
+        var links = Game1.locations.Where(l => ValidMapName(l.Name))
+            .SelectMany(l => Exits(l).Where(ValidNavigableExit)
+                .Select(w => new { from = l.Name, to = w.TargetName }))
+            .Take(300).ToArray();
         Point? bed = loc is FarmHouse home && home.GetPlayerBed() != null ? home.GetPlayerBedSpot() : null;
         var bag = player.Items.Where(i => i != null && i.QualifiedItemId.StartsWith("(O)"))
             .GroupBy(i => i!.QualifiedItemId).Take(60)
