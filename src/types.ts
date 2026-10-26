@@ -82,7 +82,7 @@ export function stateValidationIssues(input: unknown): string[] {
   checkArray("emptyPlots", 250, v => coordinate(v) && typeof v.watered === "boolean");
   checkArray("tillable", 250, coordinate);
   checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
-    /^\\(O\\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && v.count > 0);
+    /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && v.count > 0);
   checkArray("exits", 50, v => coordinate(v) && locName(v.target));
   checkArray("worldLinks", 300, v => record(v) && locName(v.from) && locName(v.to));
   if (s.bed !== null && !coordinate(s.bed)) issues.push("bed");
