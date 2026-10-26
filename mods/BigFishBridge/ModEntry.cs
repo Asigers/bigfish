@@ -8,6 +8,10 @@ using StardewValley;
 using StardewValley.Locations;
 using StardewValley.Pathfinding;
 using StardewValley.TerrainFeatures;
+using StardewValley.Objects;
+using StardewValley.Tools;
+using StardewValley.Internal;
+using SObject = StardewValley.Object;
 
 namespace BigFishBridge;
 
@@ -24,6 +28,9 @@ public sealed class RemoteCommand
     public string Location { get; set; } = "";
     public string Target { get; set; } = "";
     public string SeedId { get; set; } = "";
+    public string ItemId { get; set; } = "";
+    public string Tool { get; set; } = "";
+    public int Count { get; set; } = 1;
     public int Day { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
@@ -161,8 +168,47 @@ public sealed class ModEntry : Mod
         var links = Game1.locations.SelectMany(l => Exits(l).Select(w => new { from = l.Name, to = w.TargetName }))
             .Where(l => l.to != null).Take(300).ToArray();
         Point? bed = loc is FarmHouse home && home.GetPlayerBed() != null ? home.GetPlayerBedSpot() : null;
+        var bag = player.Items.Where(i => i != null && i.QualifiedItemId.StartsWith("(O)"))
+            .GroupBy(i => i!.QualifiedItemId).Take(60)
+            .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack),
+                category = g.First()!.Category,
+                sellable = g.First() is SObject o && o.canBeShipped() }).ToArray();
+        var chests = loc.objects.Pairs.Where(p => p.Value is Chest chest && (bool)chest.playerChest)
+            .Take(40)
+            .Select(p => new { x = (int)p.Key.X, y = (int)p.Key.Y,
+                items = ((Chest)p.Value).GetItemsForPlayer()
+                    .Where(i => i != null && i.QualifiedItemId.StartsWith("(O)"))
+                    .Take(100)
+                    .Select(i => new { id = i!.QualifiedItemId, count = i.Stack,
+                        category = i.Category, sellable = i is SObject obj && obj.canBeShipped() }).ToArray()
+            }).ToArray();
+        var bin = loc is Farm farmLoc ? farmLoc.GetStarterShippingBinLocation() : (Vector2?)null;
+        var pierre = loc.Name == "SeedShop" ? Game1.getCharacterFromName("Pierre") : null;
+        bool shopOpen = loc.Name == "SeedShop" && pierre != null && pierre.currentLocation == loc &&
+            Game1.timeOfDay >= 900 && Game1.timeOfDay < 1700 && Game1.dayOfMonth % 7 != 3;
+        object[] offers = shopOpen ? ShopBuilder.GetShopStock("SeedShop")
+            .Where(entry => entry.Key is SObject obj && obj.Category == -74 && entry.Value.Price > 0 &&
+                entry.Value.TradeItem == null && entry.Value.Stock != 0)
+            .Take(100).Select(entry => new { id = ((SObject)entry.Key).QualifiedItemId,
+                price = entry.Value.Price, stock = entry.Value.Stock > 9999 ? -1 : entry.Value.Stock }).ToArray()
+            : Array.Empty<object>();
+        object? shop = shopOpen ? new {
+            keeper = new { x = pierre!.TilePoint.X, y = pierre.TilePoint.Y },
+            open = true, offers
+        } : null;
+        var hoeTool = player.Items.OfType<Hoe>().FirstOrDefault();
+        var waterTool = player.Items.OfType<WateringCan>().FirstOrDefault();
+        var tools = new { hoe = hoeTool != null, wateringCan = waterTool != null,
+            equipped = player.CurrentTool is Hoe ? "hoe" : player.CurrentTool is WateringCan ? "watering_can" : "other",
+            waterLeft = waterTool?.WaterLeft ?? 0 };
+        var economy = new {
+            gold = player.Money, bag, chests,
+            shippingBin = bin.HasValue ? new { x = (int)bin.Value.X, y = (int)bin.Value.Y } : null,
+            shop, tools
+        };
         return new
         {
+            economy,
             saveId = Game1.uniqueIDForThisGame.ToString(),
             location = loc.Name,
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
@@ -170,7 +216,7 @@ public sealed class ModEntry : Mod
             paused = Game1.activeClickableMenu != null || Game1.eventUp || !Game1.shouldTimePass(),
             crops, emptyPlots, tillable, seeds, exits, worldLinks = links,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
-            inventoryFree = player.Items.Count(i => i == null)
+            inventoryFree = player.freeSpotsInInventory()
         };
     }
 
@@ -216,11 +262,6 @@ public sealed class ModEntry : Mod
                 BeginMovement(new Point(activeExit.X, activeExit.Y));
                 return;
             }
-            if (loc.Name != "Farm" || cmd.X < 0 || cmd.Y < 0 || cmd.X > 150 || cmd.Y > 150)
-            {
-                Finish(cmd, false, "farm tile required");
-                return;
-            }
             if (cmd.Type == "move_to")
             {
                 if (player.TilePoint.X == cmd.X && player.TilePoint.Y == cmd.Y)
@@ -230,6 +271,21 @@ public sealed class ModEntry : Mod
                 }
                 active = cmd;
                 BeginMovement(new Point(cmd.X, cmd.Y));
+                return;
+            }
+            if (cmd.Type == "equip_tool")
+            {
+                var index = player.Items.ToList().FindIndex(i => cmd.Tool == "hoe" ? i is Hoe :
+                    cmd.Tool == "watering_can" && i is WateringCan);
+                if (index < 0) { Finish(cmd, false, "tool not found"); return; }
+                player.CurrentToolIndex = index;
+                Finish(cmd, true, "equipped " + cmd.Tool);
+                return;
+            }
+            if (HandleEconomy(cmd, player, loc)) return;
+            if (loc.Name != "Farm" || cmd.X < 0 || cmd.Y < 0 || cmd.X > 150 || cmd.Y > 150)
+            {
+                Finish(cmd, false, "farm tile required");
                 return;
             }
             if (!Near(player.TilePoint, cmd.X, cmd.Y))
@@ -250,10 +306,10 @@ public sealed class ModEntry : Mod
                     Finish(cmd, false, "not diggable, occupied or no energy");
                     return;
                 }
-                // Prototype hoe behavior; real tool animation will replace it after Mac verification.
-                loc.terrainFeatures.Add(tile, new HoeDirt(0, loc));
-                player.Stamina -= 2;
-                Finish(cmd, true, "tilled soil");
+                var hoe = player.CurrentTool as Hoe;
+                if (hoe == null) { Finish(cmd, false, "equip hoe first"); return; }
+                hoe.DoFunction(loc, cmd.X * 64, cmd.Y * 64, 0, player);
+                Finish(cmd, loc.terrainFeatures.ContainsKey(tile), "hoe used");
                 return;
             }
             if (dirt == null) { Finish(cmd, false, "not tilled soil"); return; }
@@ -278,10 +334,11 @@ public sealed class ModEntry : Mod
                 if (dirt.crop == null) { Finish(cmd, false, "no planted crop"); return; }
                 if (dirt.state.Value == 1) { Finish(cmd, true, "already watered"); return; }
                 if (player.Stamina < 3) { Finish(cmd, false, "low energy"); return; }
-                // Prototyping: direct HoeDirt mutation. Watering-can use is a separate task.
-                dirt.state.Value = 1;
-                player.Stamina -= 2;
-                Finish(cmd, true, "watered crop");
+                var wateringCan = player.CurrentTool as WateringCan;
+                if (wateringCan == null) { Finish(cmd, false, "equip watering can first"); return; }
+                if (wateringCan.WaterLeft <= 0) { Finish(cmd, false, "watering can empty"); return; }
+                wateringCan.DoFunction(loc, cmd.X * 64, cmd.Y * 64, 0, player);
+                Finish(cmd, dirt.state.Value == 1, "watering can used");
                 return;
             }
             if (cmd.Type == "harvest_crop")
@@ -310,6 +367,82 @@ public sealed class ModEntry : Mod
             Game1.player.controller = null;
             Finish(cmd, false, ex.GetType().Name + ": " + ex.Message);
         }
+    }
+
+    private bool HandleEconomy(RemoteCommand cmd, Farmer player, GameLocation loc)
+    {
+        if (cmd.Type == "ship_item")
+        {
+            if (loc is not Farm farm) { Finish(cmd, false, "shipping only on farm"); return true; }
+            var bin = farm.GetStarterShippingBinLocation();
+            if (!Near(player.TilePoint, (int)bin.X, (int)bin.Y)) { Finish(cmd, false, "approach shipping bin"); return true; }
+            var item = player.Items.FirstOrDefault(i => i?.QualifiedItemId == cmd.ItemId);
+            if (item is not SObject obj || !obj.canBeShipped() || obj.Category == -74)
+            { Finish(cmd, false, "item cannot be shipped"); return true; }
+            farm.shipItem(item, player);
+            Finish(cmd, true, "shipped " + cmd.ItemId);
+            return true;
+        }
+        if (cmd.Type == "buy_seed")
+        {
+            var pierre = loc.Name == "SeedShop" ? Game1.getCharacterFromName("Pierre") : null;
+            if (pierre == null || pierre.currentLocation != loc || !Near(player.TilePoint, pierre.TilePoint.X, pierre.TilePoint.Y) ||
+                Game1.timeOfDay < 900 || Game1.timeOfDay >= 1700 || Game1.dayOfMonth % 7 == 3)
+            { Finish(cmd, false, "Pierre is not available for purchase"); return true; }
+            if (cmd.Count < 1 || cmd.Count > 12) { Finish(cmd, false, "invalid count"); return true; }
+            var offer = ShopBuilder.GetShopStock("SeedShop").FirstOrDefault(pair =>
+                pair.Key is SObject o && o.Category == -74 && o.QualifiedItemId == cmd.ItemId &&
+                pair.Value.TradeItem == null && pair.Value.Price > 0 &&
+                (pair.Value.Stock < 0 || pair.Value.Stock >= cmd.Count));
+            if (offer.Key is not SObject seed || offer.Value.Price <= 0)
+            { Finish(cmd, false, "seed not in actual shop stock"); return true; }
+            long price = (long)offer.Value.Price * cmd.Count;
+            if (price > player.Money) { Finish(cmd, false, "not enough money"); return true; }
+            var purchased = ItemRegistry.Create(cmd.ItemId);
+            purchased.Stack = cmd.Count;
+            if (!player.couldInventoryAcceptThisItem(purchased))
+            { Finish(cmd, false, "backpack cannot hold seeds"); return true; }
+            if (!player.addItemToInventoryBool(purchased))
+            { Finish(cmd, false, "inventory insertion failed"); return true; }
+            player.Money -= (int)price;
+            Finish(cmd, true, "purchased " + cmd.Count + " seeds for " + price + "g");
+            return true;
+        }
+        if (cmd.Type == "store_item" || cmd.Type == "withdraw_item")
+        {
+            if (cmd.Count < 1 || cmd.Count > 9999 || !Near(player.TilePoint, cmd.X, cmd.Y) ||
+                !loc.objects.TryGetValue(new Vector2(cmd.X, cmd.Y), out var objectAtTile) ||
+                objectAtTile is not Chest chest || !(bool)chest.playerChest ||
+                chest.GetMutex().IsLocked() && !chest.GetMutex().IsLockHeld())
+            { Finish(cmd, false, "accessible player chest required"); return true; }
+            var slots = chest.GetItemsForPlayer();
+            if (cmd.Type == "store_item")
+            {
+                var from = player.Items.FirstOrDefault(i => i?.QualifiedItemId == cmd.ItemId && i.Stack >= cmd.Count);
+                if (from == null || from is Tool) { Finish(cmd, false, "item not available to store"); return true; }
+                var move = from.getOne();
+                move.Stack = cmd.Count;
+                if (slots.Count >= chest.GetActualCapacity() && !slots.Any(i => i != null && i.canStackWith(move)))
+                { Finish(cmd, false, "chest full"); return true; }
+                var remainder = chest.addItem(move);
+                if (remainder != null && remainder.Stack > 0)
+                { Finish(cmd, false, "chest rejected item; original inventory unchanged"); return true; }
+                from.Stack -= cmd.Count;
+                if (from.Stack <= 0) player.removeItemFromInventory(from);
+                Finish(cmd, true, "stored items");
+                return true;
+            }
+            var inside = slots.FirstOrDefault(i => i?.QualifiedItemId == cmd.ItemId && i.Stack >= cmd.Count);
+            if (inside == null) { Finish(cmd, false, "chest has insufficient items"); return true; }
+            var take = inside.getOne(); take.Stack = cmd.Count;
+            if (!player.couldInventoryAcceptThisItem(take) || !player.addItemToInventoryBool(take))
+            { Finish(cmd, false, "backpack cannot accept item"); return true; }
+            inside.Stack -= cmd.Count;
+            if (inside.Stack <= 0) slots.Remove(inside);
+            Finish(cmd, true, "withdrew items");
+            return true;
+        }
+        return false;
     }
 
     private void BeginMovement(Point destination)
