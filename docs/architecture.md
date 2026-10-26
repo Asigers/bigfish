@@ -8,7 +8,7 @@
 4. **GoalMemory**: atomic JSON persisted journal at `data/bigfish-memory.json`. Survives Node restarts and prompts daily goals based on recent history.
 5. **GameBridge**: localhost-only HTTP, shared token for commands, state snapshots, command UUID acknowledgements, SSE for an OBS browser source.
 6. **SMAPI Mod**: C# reads world/inventory/shop/chests/tool state, processes one validated command on the main game thread. `ShopBuilder.GetShopStock("SeedShop")` resolves current game stock; `Farm.shipItem` handles shipment; `Chest` transfers; `Hoe.DoFunction` and `WateringCan.DoFunction` handle tools.
-7. **Fish overlay**: transparent HTML/CSS/SVG browser page `/overlay`, live speech captions from `/overlay/events`. No Node authentication secret or remote access needed. Optional macOS `say` audio.
+7. **Fish overlay**: transparent HTML/Canvas/Live2D browser page `/overlay`, live speech captions from `/overlay/events`. No Node authentication secret or remote access needed. Optional macOS `say` audio.
 
 ## Commands
 
@@ -46,3 +46,9 @@ OBS Browser Source is rendered as 1920×1080 transparent frame and anchored bott
 ## Known gaps
 
 Fishing, combat, NPC friendship, crafting/tool upgrades, foraging, buying/selling in other shops, native shop purchase callbacks, moved shipping bin, festivals, story progression, general game exploration, cloud TTS, live Bilibili gift integration, full command cancellation/commit log, stream control dashboard.
+
+## Popular whale-girl Live2D integration
+
+The optional community model is downloaded by `npm run live2d:install -- --acknowledge-noncommercial` from pinned revision `f977bef508690e75ba6535cd8f4ce18e7f6ba9b0`. Runtime and assets are **not** part of this Git repository. The installer verifies upstream Git Blob SHA-1 checksums before atomically replacing ignored `overlay/assets/`. The renderer uses PIXI 6.5.10 + pixi-live2d-display 0.4.0 + separately licensed Cubism Core loaded from localhost, not from the DSH desktop plugin. Rendering is capped at 30 FPS. SSE events trigger additive Cubism expression params, one-shot motions and a modest mouth movement while the text is visible.
+
+Public loopback-only routes: `GET /overlay`, `GET /overlay/live2d.js`, `GET /overlay/assets/status`, and allowlisted `GET /overlay/assets/{model|vendor}/...`. The model art is governed by CC BY-NC-SA 4.0 per upstream, not BigFish code license. Commercial livestream rights should be separately confirmed with the chain of creators. See `docs/live2d.md`.

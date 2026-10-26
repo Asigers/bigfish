@@ -7,3 +7,8 @@ dist/
 **/obj/
 **/config.json
 data/
+
+# Optional upstream CC BY-NC-SA Live2D assets and proprietary vendor runtime
+overlay/assets/
+overlay/assets.previous/
+overlay/.live2d-stage-*/

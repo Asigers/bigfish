@@ -3,12 +3,15 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.16.0" },
+  "engines": {
+    "node": ">=22.16.0"
+  },
   "scripts": {
     "demo": "node --experimental-strip-types src/index.ts --demo",
     "start": "node --experimental-strip-types src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "live2d:install": "node scripts/install-live2d.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0"

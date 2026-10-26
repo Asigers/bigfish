@@ -16,6 +16,7 @@ const mockTree=[
   {type:"blob",path:"assets/vendor/extraneous.js",sha:"a".repeat(40),size:10},
 ];
 test("asset installer selects only supported model and pinned runtimes",async()=>{
+  // @ts-ignore: installer deliberately ships as raw Node ESM, not TypeScript.
   const { selectAssets,blobSha,safeAssetPath } = await import("../scripts/install-live2d.mjs");
   const selected=selectAssets(mockTree);
   assert.equal(selected.length,7);

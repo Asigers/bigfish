@@ -1,6 +1,6 @@
 # BigFish — autonomously farming & live fish avatar
 
-**Mac-first autonomous Stardew Valley farm economy** powered by the Pi SDK, TypeScript and a SMAPI C# mod. It includes a transparent animated blue digital fish for the **bottom-right of OBS streams**.
+**Mac-first autonomous Stardew Valley farm economy** powered by the Pi SDK, TypeScript and a SMAPI C# mod. It supports the popular community **DeepSeek 鲸鱼娘 Live2D** model as an optional locally-installed OBS character, displayed in the bottom-right of the stream.
 
 > v0.3 experimental. **Node/controller and mock-game integration tests run in CI on macOS & Linux, but the SMAPI mod still needs to be compiled and tested against your own Stardew Valley installation.** Back up your save before testing. This is a focused farm/economy agent, not a complete open-world game player.
 
@@ -10,7 +10,7 @@
 - Starter economy: read real player gold/inventory/chests/shop stock; **buy available seasonal seed items from Pierre**, **ship actual crops via farm shipping bin** for next-day settlement, **store/withdraw** items from accessible player chests.
 - Tool management: select the real hoe/watering can; call their DoFunction for tile effects; detect and refill from water tiles. Character/tool animations may need additional Mac-game refinement.
 - Planning: Pi chooses a bounded **daily multi-day strategy** (`profit`, `expand`, `save`, seed reserve and money goal). A deterministic executor enforces real-world preconditions. Goal and activity journal persist in `data/bigfish-memory.json` through process restarts.
-- Livestream companion: **original animated blue fish** with idle, happy, excited, thinking, tired, sad and surprised expressions, live speech bubbles and an optional built-in macOS TTS voice. OBS browser source is transparent and positioned in the bottom-right.
+- Livestream companion: **community DeepSeek whale-girl Live2D** (installed separately): native model animation, preset game-driven expressions, Pi speech bubbles and optional macOS TTS. An OBS browser source anchors the character bottom-right. Artwork is not committed to the repository.
 - Reliability: local token-authenticated bridge, one command in flight, command identity, game-state heartbeat and failure limits. Critical actions re-evaluate state after completion.
 
 ## Quick start (mock game, no key or Stardew)
@@ -23,11 +23,29 @@ npm test
 npm run demo
 ```
 
-Then open **http://127.0.0.1:45931/overlay** to preview the digital fish. The demo autonomously farms a simulated map with a shop, banked gold, an inventory, shipping income and a household.
+Before previewing the whale-girl model, run the optional asset installer (see below). Then open **http://127.0.0.1:45931/overlay?preview=1** for expression/action samples, or **/overlay** for real game commentary. The demo autonomously farms a simulated map with a shop, banked gold, an inventory, shipping income and a household.
 
 The demo does **not** use a live model; the speech lines are preconfigured by the rule executor so everything can be tested offline.
 
-## OBS: display the digital fish
+## Install the community DeepSeek whale-girl Live2D model
+
+The actual **Live2D model is not included in this repository**. It is downloaded from a pinned upstream revision only on your machine after you acknowledge its non-commercial license. This avoids distributing the character artwork as if it were BigFish MIT code.
+
+[Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d) supplies the model, expressions, 8 motions and compatible PIXI/Cubism runtime.
+
+```bash
+# One-time opt-in for noncommercial use / otherwise appropriately cleared usage:
+npm run live2d:install -- --acknowledge-noncommercial
+npm run demo
+```
+
+Preview **http://127.0.0.1:45931/overlay?preview=1**. The `preview=1` mode cycles 6 sample emotions without a Pi account; ordinary `/overlay` listens to actual BigFish events.
+
+No DSH plugin, external website, Electron container or independent avatar server is required. Model files are stored in ignored `overlay/assets/`, never committed. The download is pinned and each asset's Git Blob hash is checked. To adjust the displayed model scale, use e.g. `/overlay?zoom=1.3`.
+
+**Licensing**: upstream lists **上善无形 (original character), ZipZipPipe (DeepSeek derivative design), 氵六青 (Live2D model)**; their character art is marked **CC BY-NC-SA 4.0**. Use with attribution, preserve the share-alike conditions on artwork modifications, and do **not** assume commercial livestream rights from another streamer's usage. The upstream `NOTICE.md` and `PROVENANCE.md` explicitly distinguish code, model art and proprietary Live2D Cubism Core runtime. No commercial permission is granted by this installer. See [docs/live2d.md](docs/live2d.md).
+
+## OBS: display the whale-girl Live2D character
 
 On the **same Mac** as the agent:
 1. Add **Browser Source** in OBS.
@@ -36,7 +54,7 @@ On the **same Mac** as the agent:
 4. Keep the source above the game capture. The page has a **transparent background** and places the fish near the lower-right corner.
 5. Position/scale as desired in OBS. No image files or browser extensions are needed.
 
-The avatar reacts to game actions. If the Pi model is enabled, the speech bubble displays its Chinese commentary. Expressions are determined by events and can be extended in `src/avatar.ts`.
+The Live2D avatar reacts to game actions. If Pi is enabled, speech bubbles show its Chinese commentary. Expression mapping is defined in `overlay/live2d.js`. Motion and expression assets are installed locally rather than being committed.
 
 Optional Mac speech synthesis (not required for subtitle/avatar support):
 
@@ -85,7 +103,7 @@ Health: `curl http://127.0.0.1:45931/health`. A true `connected` means recent ga
 - `src/strategy.ts`: durable bounded goal journal. Edit or remove `data/bigfish-memory.json` only while the controller is stopped.
 - `src/economy.ts`: deterministic economic tasks (shop trips, sale, storage, replenishment, strategy-dependent budgets).
 - `src/decision.ts`: crop and daily sleep planner.
-- `overlay/index.html`: animated original fish, caption and speech bubble.
+- `overlay/index.html`, `overlay/live2d.js`: whale-girl Cubism character, animation, subtitle and expressions.
 - `src/avatar.ts`: game action → facial expression mapping, TTS setting and speech throttling.
 
 The long-term **Pi strategy affects purchasing behavior and seed inventory targets**. It does not yet generate arbitrary fully general game goals such as an NPC marriage quest or mine expeditions; these are future gameplay skills.
@@ -100,7 +118,7 @@ The long-term **Pi strategy affects purchasing behavior and seed inventory targe
 - Not all game maps, festivals, narrative locked doors, minigames, menus, shops or route variants are supported.
 - Automatic gold generation is **not** implemented. An empty save with no money, seeds or sellable crops needs a new source of income before this focused farm loop can recover.
 - No live Bilibili gift feed yet. `POST /event` accepts **local simulated events**, not verified platform events.
-- The avatar artwork is an **original BigFish interpretation**, not an official DeepSeek logo or a copied fan illustration. Check branding and commercial livestream permissions before monetizing.
+- The optional avatar uses the community whale-girl character by **上善无形 / ZipZipPipe / 氵六青**, licensed by upstream as **CC BY-NC-SA 4.0** (noncommercial/share-alike). The modeling artist's livestream permission does not by itself clear underlying character rights. **Do not monetize a livestream using these assets without separate written clearance from relevant rights holders.** The artwork is not an official DeepSeek asset.
 - Unattended production streaming is **not yet warranted** without real-game build/runtime testing and game action reconciliation after timeouts.
 
 ## Architecture & developer notes
