@@ -119,6 +119,66 @@ node --experimental-strip-types src/index.ts --mock
 
 Health: `curl http://127.0.0.1:45931/health`. A true `connected` means recent game state, not that game actions are guaranteed to succeed.
 
+## Choose the Pi model (including your own New API)
+
+BigFish embeds `@earendil-works/pi-coding-agent`. **It does not take a model from the `npm run start` command line or use a Pi terminal's currently selected model session**. It loads Pi's global model catalog and saved default settings from `~/.pi/agent/`, and lets you override the model for BigFish only.
+
+**Option A: use your saved Pi default**
+
+1. Run `pi`, configure credentials via `/login` if needed.
+2. Run `/model`, choose a working model, and press **Ctrl+S** to save it as the default for new sessions.
+3. Exit Pi, retain your BigFish bridge token, then run `npm run start`.
+
+Pi's **saved default**, not an unsaved session selection, is what BigFish loads. The BigFish startup console logs the selected provider, model and thinking level.
+
+**Option B: pin a dedicated BigFish model without changing your everyday Pi model**
+
+```bash
+# Values are examples: match provider/id from your own ~/.pi/agent/models.json or Pi model picker.
+export BIGFISH_PROVIDER=newapi
+export BIGFISH_MODEL=glm-5.1
+export BIGFISH_THINKING=low
+npm run start
+```
+
+`BIGFISH_PROVIDER` and `BIGFISH_MODEL` must be set together. A missing or unavailable explicit model is a startup error (never silently falls back to another provider). Thinking can be `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Omit all three variables to reuse the default Pi model and thinking level.
+
+**Option C: add a custom compatible New API endpoint to Pi**
+
+Create or **merge** into `~/.pi/agent/models.json`, preserving your existing providers:
+
+```json
+{
+  "providers": {
+    "newapi": {
+      "baseUrl": "https://YOUR-NEWAPI-HOST/v1",
+      "api": "openai-completions",
+      "apiKey": "$NEWAPI_API_KEY",
+      "compat": {
+        "supportsDeveloperRole": false
+      },
+      "models": [
+        {
+          "id": "glm-5.1",
+          "name": "GLM via my New API",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 8192,
+          "cost": {"input":0,"output":0,"cacheRead":0,"cacheWrite":0}
+        }
+      ]
+    }
+  }
+}
+```
+
+In the same terminal as the controller, `export NEWAPI_API_KEY="..."`; keep this secret out of source control. Use the exact model ID exposed by **your** upstream gateway, not necessarily `glm-5.1`. If your endpoint supports only Responses, set `api` to `openai-responses` instead. The numeric limits above are merely examples; set them to your actual model capabilities. Never replace an existing populated `models.json` wholesale. The `supportsDeveloperRole: false` flag is appropriate for gateways that reject the `developer` message role.
+
+To test custom models before running the game, open `pi` and confirm the chosen model responds to a message. Then run the BigFish process with `BIGFISH_PROVIDER` and `BIGFISH_MODEL`.
+
+For an in-game test, **stop `--mock` (Ctrl+C) first** and run only one BigFish controller on port 45931. Make sure `BIGFISH_TOKEN` is the same value already stored in the Mod's `config.json`. The controller prints `[bigfish] Pi model: provider/id | thinking=...` on startup. The model generates **strategy and speech**, while policy validation owns the actual game actions. Re-running `npm run demo` will not call Pi.
+
 ## Personality and goals
 
 - `src/brain.ts`: Pi session, daily strategy prompt and Chinese speech prompt (tool-less/no shell).
