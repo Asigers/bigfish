@@ -42,6 +42,18 @@ const coordinate = (v: unknown): v is Tile => {
 };
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const locName = (v:unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 80 && /^[A-Za-z0-9_-]+$/.test(v);
+const validExit = (v:unknown): v is Exit => record(v) && coordinate(v) && locName(v.target);
+
+// Ignore malformed map warps while keeping all other state fields strictly validated.
+// Some Stardew locations expose off-map/placeholder warps that cannot be navigated to.
+export function sanitizeStateExits(input:unknown):{state:unknown;ignoredExits:number} {
+  if(!record(input) || !Array.isArray(input.exits) || input.exits.length>50)
+    return {state:input,ignoredExits:0};
+  const exits=input.exits.filter(validExit);
+  return {state:exits.length===input.exits.length?input:{...input,exits},
+    ignoredExits:input.exits.length-exits.length};
+}
+
 export function validState(input: unknown): input is GameState {
   if (!record(input)) return false;
   const s=input as Partial<GameState>;
@@ -53,7 +65,7 @@ export function validState(input: unknown): input is GameState {
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
-    && Array.isArray(s.exits) && s.exits.length <= 50 && s.exits.every(c=>coordinate(c)&&locName(c.target))
+    && Array.isArray(s.exits) && s.exits.length <= 50 && s.exits.every(validExit)
     && Array.isArray(s.worldLinks) && s.worldLinks.length <= 300 && s.worldLinks.every(c=>record(c)&&locName(c.from)&&locName(c.to))
     && (s.bed === null || coordinate(s.bed))
     && (s.economy === undefined || validEconomy(s.economy))
@@ -83,7 +95,7 @@ export function stateValidationIssues(input: unknown): string[] {
   checkArray("tillable", 250, coordinate);
   checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
     /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && v.count > 0);
-  checkArray("exits", 50, v => coordinate(v) && locName(v.target));
+  checkArray("exits", 50, validExit);
   checkArray("worldLinks", 300, v => record(v) && locName(v.from) && locName(v.to));
   if (s.bed !== null && !coordinate(s.bed)) issues.push("bed");
   if (s.economy !== undefined && !validEconomy(s.economy)) issues.push("economy");
