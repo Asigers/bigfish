@@ -1,0 +1,97 @@
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual, randomUUID } from "node:crypto";
+import type { Action, ActionResult, Command, GameState, ViewerEvent } from "./types.ts";
+import { validState } from "./types.ts";
+
+type Pending = { cmd: Command; resolve: (result: ActionResult) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
+
+export class GameBridge {
+  private server: Server | undefined;
+  private state: GameState | undefined;
+  private stateAt = 0;
+  private pending: Pending | undefined;
+  private events: ViewerEvent[] = [];
+  constructor(readonly token: string, readonly port = 45931, readonly host = "127.0.0.1") {
+    if (token.length < 16 || token === "replace-with-a-random-secret") throw new Error("Set a random BIGFISH_TOKEN (16+ characters)");
+    if (host !== "127.0.0.1") throw new Error("MVP is intentionally loopback-only");
+  }
+  private authorized(req: IncomingMessage): boolean {
+    const supplied = req.headers["x-bigfish-token"];
+    if (typeof supplied !== "string") return false;
+    const a = Buffer.from(supplied); const b = Buffer.from(this.token);
+    return a.length === b.length && timingSafeEqual(a,b);
+  }
+  private respond(res: ServerResponse, status: number, value: unknown): void {
+    res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify(value));
+  }
+  private async body(req: IncomingMessage): Promise<unknown> {
+    let value = "";
+    for await (const chunk of req) {
+      value += chunk.toString("utf8");
+      if (value.length > 64_000) throw new Error("Payload too large");
+    }
+    return JSON.parse(value);
+  }
+  async start(): Promise<void> {
+    this.server = createServer(async (req,res) => {
+      try {
+        if (req.url === "/health" && req.method === "GET") return this.respond(res,200,{ ok:true, connected: Boolean(this.getState()) });
+        if (!this.authorized(req)) return this.respond(res,401,{error:"unauthorized"});
+        if (req.url === "/state" && req.method === "POST") {
+          const s = await this.body(req);
+          if (!validState(s)) return this.respond(res,400,{error:"invalid state"});
+          this.state = s; this.stateAt = Date.now();
+          return this.respond(res,200,{ok:true});
+        }
+        if (req.url === "/next" && req.method === "GET") {
+          return this.respond(res,200,{command:this.pending?.cmd ?? null});
+        }
+        if (req.url === "/result" && req.method === "POST") {
+          const r = await this.body(req) as Partial<ActionResult>;
+          if (typeof r?.id !== "string" || typeof r.ok !== "boolean" || typeof r.message !== "string")
+            return this.respond(res,400,{error:"invalid result"});
+          if (!this.pending || this.pending.cmd.id !== r.id) return this.respond(res,409,{error:"no matching command"});
+          const pending = this.pending; this.pending = undefined;
+          clearTimeout(pending.timer);
+          pending.resolve({id:r.id, ok:r.ok, message:r.message.slice(0,300)});
+          return this.respond(res,200,{ok:true});
+        }
+        if (req.url === "/event" && req.method === "POST") {
+          const e = await this.body(req) as Partial<ViewerEvent>;
+          if (!e || (e.kind !== "chat" && e.kind !== "gift") || typeof e.user !== "string" || typeof e.text !== "string")
+            return this.respond(res,400,{error:"invalid event"});
+          this.events.push({ kind:e.kind, user:e.user.slice(0,40), text:e.text.slice(0,200) });
+          this.events = this.events.slice(-30);
+          return this.respond(res,200,{ok:true});
+        }
+        return this.respond(res,404,{error:"not found"});
+      } catch (error) {
+        this.respond(res,400,{error:error instanceof Error ? error.message : "bad request"});
+      }
+    });
+    await new Promise<void>((resolve,reject) => {
+      this.server!.once("error",reject);
+      this.server!.listen(this.port,this.host,resolve);
+    });
+  }
+  getState(): GameState | undefined { return Date.now()-this.stateAt < 4000 ? this.state : undefined; }
+  drainEvents(): ViewerEvent[] { return this.events.splice(0); }
+  send(action: Exclude<Action,{type:"wait"}>, timeoutMs = 15000): Promise<ActionResult> {
+    if (this.pending) return Promise.reject(new Error("A command is already pending"));
+    if (!this.getState()) return Promise.reject(new Error("Game state is stale"));
+    return new Promise((resolve,reject) => {
+      const cmd: Command = { ...action, id: randomUUID() };
+      const timer = setTimeout(() => {
+        if (this.pending?.cmd.id === cmd.id) this.pending = undefined;
+        reject(new Error("Game command timed out: "+cmd.type));
+      },timeoutMs);
+      this.pending = {cmd,resolve,reject,timer};
+    });
+  }
+  async stop(): Promise<void> {
+    const pending = this.pending; this.pending=undefined;
+    if(pending){clearTimeout(pending.timer);pending.reject(new Error("Bridge stopped"));}
+    if(this.server) await new Promise<void>((resolve)=>this.server!.close(()=>resolve()));
+  }
+}
