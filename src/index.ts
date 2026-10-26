@@ -18,6 +18,8 @@ const planner=new Autopilot();
 const economy=new EconomyPlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
+const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
+let nextDialogueAt=0;
 let stopping=false;
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 let stopDemo:(()=>void)|undefined;
@@ -52,6 +54,8 @@ async function run():Promise<void>{
     const s=bridge.getState();
     if(!s){await sleep(300);continue;}
     const events=bridge.drainEvents();
+    pendingViewerEvents.push(...events);
+    if(pendingViewerEvents.length>30)pendingViewerEvents.splice(0,pendingViewerEvents.length-30);
     let action:Action|undefined;
     let result:ActionResult|undefined;
     try {
@@ -70,9 +74,11 @@ async function run():Promise<void>{
       let d:Decision=economy.propose(s,goal)??planner.decide(s);
       const toolAction=requiredTool(s,d.action);
       if(toolAction)d={action:toolAction,reason:"Prepare correct real game tool",speech:"先拿好工具。"};
-      if(brain && ((Date.now()/1000|0)%18===0 || d.action.type==="sleep" || d.action.type==="buy_seed")){
+      if(brain && (Date.now()>=nextDialogueAt || d.action.type==="sleep" || d.action.type==="buy_seed")){
+        nextDialogueAt=Date.now()+18000;
         try{
-          const proposed=await brain.decide(s,recent,events);
+          const proposed=await brain.decide(s,recent,pendingViewerEvents);
+          pendingViewerEvents.length=0;
           if(proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
             d=proposed;
           else if(proposed.speech) d={...d,speech:proposed.speech};
