@@ -111,7 +111,18 @@ public sealed class ModEntry : Mod
     // Expose a conservative built-in Farm <-> FarmHouse link at the actual door locations.
     private IEnumerable<Warp> Exits(GameLocation location)
     {
-        foreach (var warp in location.warps) yield return warp;
+        foreach (var warp in location.warps.Where(w => !w.npcOnly.Value)) yield return warp;
+        // Pierre's front door is a map action, not necessarily a regular location warp.
+        // Only expose the public SeedShop entrance, never locked/story doors or arbitrary teleports.
+        if (location.Name == "Town")
+        {
+            foreach (var entry in location.doors.Pairs)
+            {
+                var doorWarp = location.getWarpFromDoor(entry.Key, Game1.player);
+                if (doorWarp?.TargetName == "SeedShop")
+                    yield return doorWarp;
+            }
+        }
         var house = Game1.getLocationFromName("FarmHouse") as FarmHouse;
         if (house == null) yield break;
         var outer = Game1.getFarm().GetMainFarmHouseEntry();
