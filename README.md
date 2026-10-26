@@ -1,40 +1,19 @@
-# BigFish 🐟 — Autonomous Stardew Valley farm agent (v0.2)
+# BigFish — autonomously farming & live fish avatar
 
-Mac-first autonomous **farming cycle** using Pi SDK (TypeScript) plus a local SMAPI (C#) mod. The controller is a process on your Mac. No Windows VM or Python runtime required.
+**Mac-first autonomous Stardew Valley farm economy** powered by the Pi SDK, TypeScript and a SMAPI C# mod. It includes a transparent animated blue digital fish for the **bottom-right of OBS streams**.
 
-> **Experimental game-control prototype, not a complete general Stardew player.** The farm loop is implemented in source and exercised in the offline simulator; the C# mod still requires compilation with your installed game and real gameplay testing. Use a BACKUP SAVE, not your main save.
+> v0.3 experimental. **Node/controller and mock-game integration tests run in CI on macOS & Linux, but the SMAPI mod still needs to be compiled and tested against your own Stardew Valley installation.** Back up your save before testing. This is a focused farm/economy agent, not a complete open-world game player.
 
-## v0.2 farming loop
+## Features
 
-After loading a game, the controller reads world state and performs:
+- Farm loop: water, till, plant, harvest, walk and move between game locations, return home and sleep.
+- Starter economy: read real player gold/inventory/chests/shop stock; **buy available seasonal seed items from Pierre**, **ship actual crops via farm shipping bin** for next-day settlement, **store/withdraw** items from accessible player chests.
+- Tool management: select the real hoe/watering can; call their DoFunction for tile effects; detect and refill from water tiles. Character/tool animations may need additional Mac-game refinement.
+- Planning: Pi chooses a bounded **daily multi-day strategy** (`profit`, `expand`, `save`, seed reserve and money goal). A deterministic executor enforces real-world preconditions. Goal and activity journal persist in `data/bigfish-memory.json` through process restarts.
+- Livestream companion: **original animated blue fish** with idle, happy, excited, thinking, tired, sad and surprised expressions, live speech bubbles and an optional built-in macOS TTS voice. OBS browser source is transparent and positioned in the bottom-right.
+- Reliability: local token-authenticated bridge, one command in flight, command identity, game-state heartbeat and failure limits. Critical actions re-evaluate state after completion.
 
-1. **Harvest** mature crops, if there is inventory space.
-2. **Water** planted dry crops.
-3. **Plant** seeds that already exist in the player's inventory into empty tilled soil.
-4. **Till** a small number of nearby safe diggable tiles when more plots are needed.
-5. **Travel** through mapped location exits (including Farm ↔ FarmHouse door fallback).
-6. **Sleep** in the actual farmhouse bed through the game's built-in sleep action, then repeat next morning.
-
-Failure counters prevent repeatedly issuing a permanently failing action in the same day. Commands include save ID, day and source location to reject stale commands, and the controller waits for a new game snapshot after each action.
-
-Pi is **optional for the deterministic offline demo**, but used in real `npm run start` mode for character speech and suggestions. The farm-day planner retains control of the task phase so a model cannot idle forever or wander away in place of farming.
-
-### Remaining limitations
-
-- **Needs pre-existing seeds**: buying seeds, chest withdrawal, shipping/selling, tools crafting and general exploration are NOT implemented. On an empty inventory the agent will finish the day and sleep rather than magically create seeds.
-- Tilling and watering still use prototype game-state mutations, not visible Hoe/watering-can tool animations. Planting calls `HoeDirt.plant`; harvesting calls the built-in `Crop.harvest`.
-- Multi-location travel follows game `warps` and the farmhouse-door fallback; custom door actions, festivals and locked transitions may not work.
-- Multiplayer is unsupported. Menus, scripted events, unsupported maps, inaccessible plots and some mod combinations require intervention.
-- No Bilibili integration, actual gift effects, TTS, avatar or OBS overlay yet.
-- Snapshot protocol and the TypeScript integration tests are verified in CI; **SMAPI Mac compilation, game animation and overnight saving remain unverified** until tested against a local Stardew installation.
-
-## Mac requirements
-
-- macOS, Steam/GOG Stardew Valley 1.6.14+, SMAPI 4.5.x.
-- Node.js 22.16+ and npm; .NET 6-capable SDK for the C# mod.
-- Optional: a working Pi model/provider configuration to enable AI dialogue.
-
-## Quick start: fully simulated farm (no game, API keys or Steam)
+## Quick start (mock game, no key or Stardew)
 
 ```bash
 git clone https://github.com/Asigers/bigfish.git
@@ -44,67 +23,99 @@ npm test
 npm run demo
 ```
 
-The simulator exercises real HTTP routes with a fake game, including planting, tilling, watering, harvesting and day changes. Stop with Ctrl+C.
+Then open **http://127.0.0.1:45931/overlay** to preview the digital fish. The demo autonomously farms a simulated map with a shop, banked gold, an inventory, shipping income and a household.
 
-## Install SMAPI bridge on your Mac
+The demo does **not** use a live model; the speech lines are preconfigured by the rule executor so everything can be tested offline.
 
-1. Install Stardew Valley, install SMAPI, run the game once through SMAPI.
-2. From the repository root, compile:
+## OBS: display the digital fish
 
+On the **same Mac** as the agent:
+1. Add **Browser Source** in OBS.
+2. Set URL to `http://127.0.0.1:45931/overlay`.
+3. Set Width to **1920** and Height to **1080**, or match your canvas dimensions.
+4. Keep the source above the game capture. The page has a **transparent background** and places the fish near the lower-right corner.
+5. Position/scale as desired in OBS. No image files or browser extensions are needed.
+
+The avatar reacts to game actions. If the Pi model is enabled, the speech bubble displays its Chinese commentary. Expressions are determined by events and can be extended in `src/avatar.ts`.
+
+Optional Mac speech synthesis (not required for subtitle/avatar support):
+
+```bash
+export BIGFISH_TTS=say
+npm run start
+```
+
+This invokes the built-in `say` program with safe process arguments. OBS must capture the audio from your Mac appropriately. For natural high-quality voices a cloud TTS provider can later replace the system voice.
+
+## Install the actual game bridge (macOS)
+
+Prerequisites: Stardew Valley 1.6.x, a compatible SMAPI 4.5.x release, .NET SDK to build mods, Node.js 22.16+, npm. See [SMAPI](https://smapi.io/).
+
+1. Install SMAPI and launch the game through SMAPI at least once.
+2. Build the included mod:
 ```bash
 dotnet build mods/BigFishBridge/BigFishBridge.csproj -c Release
 ```
-
-SMAPI's ModBuildConfig normally locates and deploys the assembly to the game's `Mods` directory. If it does not, inspect the build output, and manually place `BigFishBridge.dll` and `manifest.json` into `Stardew Valley/Mods/BigFishBridge/`. Check the exact Mods path SMAPI logs on startup. Do not copy `mods/BigFishBridge/` source files into Mods instead of the compiled DLL.
-
-3. Generate **one** random token in the current terminal:
-
+3. Check that the game Mods directory contains `BigFishBridge/manifest.json` and the compiled `BigFishBridge.dll`. ModBuildConfig may copy them automatically; otherwise copy from build output to the directory shown in SMAPI logs.
+4. Generate **one secret** and keep it in this terminal:
 ```bash
 export BIGFISH_TOKEN="$(openssl rand -hex 24)"
 echo "$BIGFISH_TOKEN"
 ```
-
-4. In the installed `Mods/BigFishBridge/config.json`, set:
-
+5. In the installed `Mods/BigFishBridge/config.json`, configure the exact same value:
 ```json
-{"Port":45931,"Token":"PASTE_THE_EXACT_BIGFISH_TOKEN_FROM_YOUR_TERMINAL"}
+{"Port":45931,"Token":"PASTE_TOKEN_PRINTED_ABOVE"}
 ```
-
-5. With that same environment variable in the current terminal, start the controller:
-
+6. Run the controller using the same terminal (choose a valid Pi provider/model in Pi first):
 ```bash
 npm run start
 ```
+7. Open a backed-up Stardew save through SMAPI and enter the farm.
 
-6. Launch Stardew through SMAPI, load a **throwaway/backup** save, and enter the farm. Ensure some starter seeds exist in the backpack. Start small (2–3 plots) until game actions have been verified.
-
-For testing the C# bridge **without spending model tokens**, run instead:
-
+For a first game-side test **without model calls** use:
 ```bash
 node --experimental-strip-types src/index.ts --mock
 ```
 
-Check the local bridge health:
+Health: `curl http://127.0.0.1:45931/health`. A true `connected` means recent game state, not that game actions are guaranteed to succeed.
+
+## Personality and goals
+
+- `src/brain.ts`: Pi session, daily strategy prompt and Chinese speech prompt (tool-less/no shell).
+- `src/strategy.ts`: durable bounded goal journal. Edit or remove `data/bigfish-memory.json` only while the controller is stopped.
+- `src/economy.ts`: deterministic economic tasks (shop trips, sale, storage, replenishment, strategy-dependent budgets).
+- `src/decision.ts`: crop and daily sleep planner.
+- `overlay/index.html`: animated original fish, caption and speech bubble.
+- `src/avatar.ts`: game action → facial expression mapping, TTS setting and speech throttling.
+
+The long-term **Pi strategy affects purchasing behavior and seed inventory targets**. It does not yet generate arbitrary fully general game goals such as an NPC marriage quest or mine expeditions; these are future gameplay skills.
+
+## Important constraints
+
+- Seed purchases require available money, the game stock listing, Pierre present, business hours and a valid local route. **The initial transaction handler uses game shop stock/prices and inventory mutation but does not invoke all native ShopMenu purchase callbacks, price/stock sync or quest triggers**. Do not rely on it for limited-stock/special merchandise.
+- Sale is a real farm shipping-bin transfer; money appears at the next game-day settlement, **not** when the item is shipped.
+- Shipping position currently uses the farm's starter-bin location; moved shipping bins need more map support.
+- Chest support is restricted to accessible **player-owned** chests; multiplayer is not supported.
+- Tool use is through game methods, but fully faithful character animations and all upgrades require in-game verification.
+- Not all game maps, festivals, narrative locked doors, minigames, menus, shops or route variants are supported.
+- Automatic gold generation is **not** implemented. An empty save with no money, seeds or sellable crops needs a new source of income before this focused farm loop can recover.
+- No live Bilibili gift feed yet. `POST /event` accepts **local simulated events**, not verified platform events.
+- The avatar artwork is an **original BigFish interpretation**, not an official DeepSeek logo or a copied fan illustration. Check branding and commercial livestream permissions before monetizing.
+- Unattended production streaming is **not yet warranted** without real-game build/runtime testing and game action reconciliation after timeouts.
+
+## Architecture & developer notes
+
+See [docs/architecture.md](docs/architecture.md).
+
+### Tests
 
 ```bash
-curl http://127.0.0.1:45931/health
+npm test
+npm run typecheck
 ```
 
-`connected: true` means the game posted state recently. A healthy connection alone does not validate that all C# actions are safe in-game.
-
-## Simulated viewer chat
-
-```bash
-curl -X POST http://127.0.0.1:45931/event \
-  -H "x-bigfish-token: $BIGFISH_TOKEN" \
-  -H "content-type: application/json" \
-  -d '{"kind":"chat","user":"viewer","text":"记得浇水"}'
-```
-
-This **is not** a verified Bilibili event or an actual gift reward.
+These run on macOS and Linux in GitHub Actions. They cover schema, policy decisions, persistence, crop loop, buying/shipping simulated bridge flow and the OBS page/SSE. They **do not compile the C# SMAPI mod**.
 
 ## Safety
 
-The bridge is bound to `127.0.0.1`, mutating endpoints require a shared token, and the Pi session has no shell/file/browser tools. Never expose port 45931 publicly. Never commit your `config.json`, `.env` or game saves.
-
-See [architecture and protocol](docs/architecture.md) for the source-state contract, failure boundaries and extension plan.
+HTTP is bound only to `127.0.0.1`, with a shared secret on all mutation routes. The token is never sent to the OBS overlay; the latter only streams non-sensitive speech events. Do not expose the bridge port publicly or commit credentials/save files. Viewer text is untrusted data; the Pi SDK session has no filesystem, shell, browser or arbitrary tools.
