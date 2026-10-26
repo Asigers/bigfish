@@ -297,7 +297,10 @@ public sealed class ModEntry : Mod
                 if (!player.Items.Any(i => i == null)) { Finish(cmd, false, "no free inventory slot"); return; }
                 var consumed = crop.harvest(cmd.X, cmd.Y, dirt);
                 if (consumed) dirt.crop = null; // game harvest returns true when crop must be removed
-                Finish(cmd, consumed || dirt.crop != crop, "harvest attempted; inspect inventory and crop state");
+                bool stillReady = dirt.crop == crop && !crop.dead.Value &&
+                    crop.currentPhase.Value >= crop.phaseDays.Count - 1 &&
+                    (!crop.fullyGrown.Value || crop.dayOfCurrentPhase.Value <= 0);
+                Finish(cmd, consumed || !stillReady, consumed || !stillReady ? "crop harvested" : "harvest did not complete");
                 return;
             }
             Finish(cmd, false, "unsupported action");

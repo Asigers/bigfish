@@ -37,7 +37,9 @@ async function run():Promise<void> {
       if(brain){
         try{
           const proposed=await brain.decide(state,recent,events);
-          if(validateAgainstWorld(proposed.action,state))d=proposed;
+          // Do not let free-form model output override the farm-day phase with endless waits or detours.
+          if(validateAgainstWorld(proposed.action,state) && proposed.action.type===d.action.type)d=proposed;
+          else d={...d,speech:proposed.speech || d.speech};
         }catch(error){
           console.warn("[bigfish] Pi response rejected, using deterministic planner",error instanceof Error?error.message:error);
         }
