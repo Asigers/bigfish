@@ -6,6 +6,7 @@ using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
 using StardewValley.Locations;
+using StardewValley.Pathfinding;
 using StardewValley.TerrainFeatures;
 
 namespace BigFishBridge;
@@ -146,7 +147,7 @@ public sealed class ModEntry : Mod
                 var tile = new Vector2(x, y);
                 if (x < 0 || y < 0 || !loc.isTileOnMap(tile)) continue;
                 if (loc.doesTileHaveProperty(x, y, "Diggable", "Back") == null) continue;
-                if (!loc.isTileLocationTotallyClearAndPlaceable(tile)) continue;
+                if (!loc.CanItemBePlacedHere(tile, itemIsPassable: true)) continue;
                 tillable.Add(new { x, y });
             }
         }
@@ -244,13 +245,13 @@ public sealed class ModEntry : Mod
                 if (dirt != null) { Finish(cmd, true, "already tilled"); return; }
                 if (player.Stamina < 4 || !loc.isTileOnMap(tile) ||
                     loc.doesTileHaveProperty(cmd.X, cmd.Y, "Diggable", "Back") == null ||
-                    !loc.isTileLocationTotallyClearAndPlaceable(tile))
+                    !loc.CanItemBePlacedHere(tile, itemIsPassable: true))
                 {
                     Finish(cmd, false, "not diggable, occupied or no energy");
                     return;
                 }
                 // Prototype hoe behavior; real tool animation will replace it after Mac verification.
-                loc.terrainFeatures.Add(tile, new HoeDirt());
+                loc.terrainFeatures.Add(tile, new HoeDirt(0, loc));
                 player.Stamina -= 2;
                 Finish(cmd, true, "tilled soil");
                 return;
@@ -334,7 +335,7 @@ public sealed class ModEntry : Mod
                 // Sleep is initiated at the actual bed location (not an arbitrary global time jump).
                 player.Position = new Vector2(bed.X * 64f, bed.Y * 64f);
                 sleeping = true;
-                house.startSleep();
+                house.answerDialogueAction("Sleep_Yes", Array.Empty<string>());
                 return;
             }
         }
