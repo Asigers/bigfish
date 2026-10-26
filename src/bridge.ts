@@ -11,7 +11,13 @@ export class GameBridge {
   private stateAt = 0;
   private pending: Pending | undefined;
   private events: ViewerEvent[] = [];
-  constructor(readonly token: string, readonly port = 45931, readonly host = "127.0.0.1") {
+  readonly token: string;
+  readonly port: number;
+  readonly host: string;
+  constructor(token: string, port = 45931, host = "127.0.0.1") {
+    this.token = token;
+    this.port = port;
+    this.host = host;
     if (token.length < 16 || token === "replace-with-a-random-secret") throw new Error("Set a random BIGFISH_TOKEN (16+ characters)");
     if (host !== "127.0.0.1") throw new Error("MVP is intentionally loopback-only");
   }
