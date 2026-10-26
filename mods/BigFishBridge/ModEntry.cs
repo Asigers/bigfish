@@ -206,7 +206,7 @@ public sealed class ModEntry : Mod
             .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack),
                 category = g.First()!.Category,
                 sellable = g.First() is SObject o && o.canBeShipped() }).ToArray();
-        var chests = loc.objects.Pairs.Where(p => p.Value is Chest chest && (bool)chest.playerChest)
+        var chests = loc.objects.Pairs.Where(p => p.Value is Chest chest && chest.playerChest.Value)
             .Take(40)
             .Select(p => new { x = (int)p.Key.X, y = (int)p.Key.Y,
                 items = ((Chest)p.Value).GetItemsForPlayer()
@@ -456,7 +456,7 @@ public sealed class ModEntry : Mod
         {
             if (cmd.Count < 1 || cmd.Count > 9999 || !Near(player.TilePoint, cmd.X, cmd.Y) ||
                 !loc.objects.TryGetValue(new Vector2(cmd.X, cmd.Y), out var objectAtTile) ||
-                objectAtTile is not Chest chest || !(bool)chest.playerChest ||
+                objectAtTile is not Chest chest || !chest.playerChest.Value ||
                 chest.GetMutex().IsLocked() && !chest.GetMutex().IsLockHeld())
             { Finish(cmd, false, "accessible player chest required"); return true; }
             var slots = chest.GetItemsForPlayer();
