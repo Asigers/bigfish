@@ -79,7 +79,11 @@ async function run():Promise<void>{
         try{
           const proposed=await brain.decide(s,recent,pendingViewerEvents);
           pendingViewerEvents.length=0;
-          if(proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
+          const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can"];
+          // Valid world action is not enough for money/inventory policy: the deterministic
+          // decision also enforces seed budgets and preservation of essential supplies.
+          if(!economyTransaction.includes(d.action.type) &&
+              proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
             d=proposed;
           else if(proposed.speech) d={...d,speech:proposed.speech};
         }catch(error){console.warn("[brain] using safe plan:",error instanceof Error?error.message:String(error));}
