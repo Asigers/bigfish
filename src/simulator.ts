@@ -1,4 +1,4 @@
-import type { ActionResult, Command, GameState, BagItem, Tile } from "./types.ts";
+import type { ActionResult, Command, GameState, BagItem, Tile, EconomyState } from "./types.ts";
 type Room="Farm"|"FarmHouse"|"BusStop"|"Town"|"SeedShop";
 const exits:Record<Room,{x:number;y:number;target:Room}[]>={
   Farm:[{x:6,y:2,target:"FarmHouse"},{x:8,y:6,target:"BusStop"}],
@@ -14,9 +14,10 @@ export function startSimulator(port:number,token:string):()=>void{
     bag:[{id:"(O)472",count:2,category:-74,sellable:false}] as BagItem[],
     chests:[{x:6,y:3,items:[] as BagItem[]}],
     shippingBin:{x:7,y:4} as Tile|null,
-    shop:null as GameState["economy"] extends {shop:infer T}?T:never,
+    shop:null as EconomyState["shop"],
     tools:{hoe:true,wateringCan:true,equipped:"hoe",waterLeft:40}
   };
+  const savedChests=economy.chests;
   const state:GameState={
     saveId:"demo-save",location:"Farm",day:1,season:"spring",time:610,energy:200,x:4,y:4,paused:false,
     crops:[{x:5,y:4,watered:false,ready:false}],emptyPlots:[{x:6,y:5,watered:false}],
@@ -33,7 +34,7 @@ export function startSimulator(port:number,token:string):()=>void{
     state.exits=exits[room]??[];
     state.bed=room==="FarmHouse"?{x:5,y:5}:null;
     economy.shippingBin=room==="Farm"?{x:7,y:4}:null;
-    economy.chests=room==="Farm"?economy.chests:[];
+    economy.chests=room==="Farm"?savedChests:[];
     economy.shop=room==="SeedShop"?{keeper:{x:5,y:4},open:state.time>=900&&state.time<1700,
       offers:[{id:"(O)472",price:20,stock:-1}]}:null;
   }
