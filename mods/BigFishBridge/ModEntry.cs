@@ -127,6 +127,7 @@ public sealed class ModEntry : Mod
         var player = Game1.player;
         var loc = player.currentLocation;
         var crops = new List<object>();
+        var waterSources = new List<object>();
         var emptyPlots = new List<object>();
         var tillable = new List<object>();
         if (loc.Name == "Farm")
@@ -144,6 +145,14 @@ public sealed class ModEntry : Mod
                 }
                 else emptyPlots.Add(new { x, y, watered = dirt.state.Value == 1 });
                 if (crops.Count + emptyPlots.Count >= 200) break;
+            }
+            // Detect map water refill sources near the farmer.
+            for (int dx = -10; dx <= 10 && waterSources.Count < 60; dx++)
+            for (int dy = -10; dy <= 10 && waterSources.Count < 60; dy++)
+            {
+                int x = player.TilePoint.X + dx, y = player.TilePoint.Y + dy;
+                if (x >= 0 && y >= 0 && loc.isTileOnMap(x, y) && loc.CanRefillWateringCanOnTile(x, y))
+                    waterSources.Add(new { x, y });
             }
             // Never suggest land occupied by objects, terrain features, or non-diggable tiles.
             for (int dx = -7; dx <= 7 && tillable.Count < 40; dx++)
@@ -214,7 +223,7 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = Game1.activeClickableMenu != null || Game1.eventUp || !Game1.shouldTimePass(),
-            crops, emptyPlots, tillable, seeds, exits, worldLinks = links,
+            crops, emptyPlots, tillable, seeds, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
@@ -296,6 +305,15 @@ public sealed class ModEntry : Mod
             var tile = new Vector2(cmd.X, cmd.Y);
             loc.terrainFeatures.TryGetValue(tile, out var terrain);
             var dirt = terrain as HoeDirt;
+            if (cmd.Type == "refill_watering_can")
+            {
+                var can = player.CurrentTool as WateringCan;
+                if (can == null || !loc.CanRefillWateringCanOnTile(cmd.X, cmd.Y))
+                { Finish(cmd, false, "equip can and approach refillable water source"); return; }
+                can.DoFunction(loc, cmd.X * 64, cmd.Y * 64, 0, player);
+                Finish(cmd, can.WaterLeft > 0, "water refilled");
+                return;
+            }
             if (cmd.Type == "till_tile")
             {
                 if (dirt != null) { Finish(cmd, true, "already tilled"); return; }
