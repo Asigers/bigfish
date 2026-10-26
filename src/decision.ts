@@ -57,6 +57,14 @@ export function parseDecision(raw:string):Decision {
     }
   else if(a.type==="travel_to"&&typeof a.target==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(a.target))
     action={type:"travel_to",target:a.target};
+  else if((a.type==="ship_item")&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId))
+    action={type:"ship_item",itemId:a.itemId};
+  else if(a.type==="buy_seed"&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId)&&Number.isInteger(a.count)&&Number(a.count)>0&&Number(a.count)<=12)
+    action={type:"buy_seed",itemId:a.itemId,count:Number(a.count)};
+  else if(["store_item","withdraw_item"].includes(String(a.type))&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId)&&Number.isInteger(a.count)&&Number(a.count)>0&&Number(a.count)<=9999&&Number.isInteger(a.x)&&Number.isInteger(a.y))
+    action={type:a.type as "store_item"|"withdraw_item",itemId:a.itemId,count:Number(a.count),x:Number(a.x),y:Number(a.y)};
+  else if(a.type==="equip_tool"&&(a.tool==="hoe"||a.tool==="watering_can"))
+    action={type:"equip_tool",tool:a.tool};
   else if(a.type==="sleep")action={type:"sleep"};
   else throw Error("Unsupported action");
   return {action,speech:typeof d.speech==="string"?d.speech.slice(0,100):"",reason:typeof d.reason==="string"?d.reason.slice(0,120):""};
@@ -147,6 +155,19 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   if(a.type==="sleep")return s.location==="FarmHouse"&&s.bed!==null;
   if(a.type==="travel_to")return s.exits.some(e=>e.target===a.target);
   if(a.type==="move_to")return a.x>=0&&a.y>=0&&a.x<150&&a.y<150;
+  if(a.type==="equip_tool")return Boolean(s.economy && (a.tool==="hoe"?s.economy.tools.hoe:s.economy.tools.wateringCan));
+  if(a.type==="buy_seed"){
+    const shop=s.economy?.shop;
+    return s.location==="SeedShop"&&Boolean(shop?.open&&shop.offers.some(o=>o.id===a.itemId&&o.price*a.count<=s.economy!.gold&&(o.stock<0||o.stock>=a.count))&&close(here,shop.keeper));
+  }
+  if(a.type==="ship_item"){
+    const e=s.economy;
+    return s.location==="Farm"&&Boolean(e?.shippingBin&&close(here,e.shippingBin)&&e.bag.some(i=>i.id===a.itemId&&i.sellable));
+  }
+  if(a.type==="store_item"||a.type==="withdraw_item"){
+    const e=s.economy; const chest=e?.chests.find(c=>c.x===a.x&&c.y===a.y);
+    return Boolean(chest&&close(here,chest)&&(a.type==="store_item"?e!.bag:chest.items).some(i=>i.id===a.itemId&&i.count>=a.count));
+  }
   if(s.location!=="Farm"||!close(here,a))return false;
   if(a.type==="water_tile")return s.crops.some(c=>c.x===a.x&&c.y===a.y&&!c.watered);
   if(a.type==="harvest_crop")return s.inventoryFree>0&&s.crops.some(c=>c.x===a.x&&c.y===a.y&&c.ready);
