@@ -39,3 +39,30 @@ test("bad snapshots rejected, command expires",async()=>{
     assert.equal(command,null);
   }finally{await bridge.stop();}
 });
+
+
+test("malformed map exits do not reject an otherwise valid snapshot",async()=>{
+  const bridge=new GameBridge(token,0);await bridge.start();
+  try{
+    const base="http://127.0.0.1:"+bridge.listeningPort();
+    const stateWithBadExit={...state,exits:[
+      {x:5,y:6,target:"FarmHouse"},
+      {x:-1,y:0,target:"FarmHouse"},
+      {x:10,y:10,target:"invalid target"}
+    ]};
+    const response=await fetch(base+"/state",{method:"POST",headers,body:JSON.stringify(stateWithBadExit)});
+    assert.equal(response.status,200);
+    assert.deepEqual(bridge.getState()?.exits,[{x:5,y:6,target:"FarmHouse"}]);
+  }finally{await bridge.stop();}
+});
+test("bad non-exit snapshot fields remain rejected",async()=>{
+  const bridge=new GameBridge(token,0);await bridge.start();
+  try{
+    const base="http://127.0.0.1:"+bridge.listeningPort();
+    const response=await fetch(base+"/state",{method:"POST",headers,
+      body:JSON.stringify({...state,exits:[{x:-1,y:0,target:"FarmHouse"}],day:99})});
+    assert.equal(response.status,400);
+    const body=await response.json() as {fields:string[]};
+    assert.ok(body.fields.includes("day range"));
+  }finally{await bridge.stop();}
+});
