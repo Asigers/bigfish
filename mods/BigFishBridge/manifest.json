@@ -1,0 +1,10 @@
+{
+  "Name": "BigFish Bridge",
+  "Author": "Asigers",
+  "Version": "0.1.0",
+  "Description": "Loopback-only Stardew Valley state and action bridge for BigFish.",
+  "UniqueID": "Asigers.BigFishBridge",
+  "EntryDll": "BigFishBridge.dll",
+  "MinimumApiVersion": "4.5.0",
+  "UpdateKeys": []
+}
