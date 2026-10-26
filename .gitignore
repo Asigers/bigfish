@@ -12,3 +12,4 @@ data/
 overlay/assets/
 overlay/assets.previous/
 overlay/.live2d-stage-*/
+overlay/.live2d-cache/

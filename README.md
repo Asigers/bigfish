@@ -43,6 +43,28 @@ Preview **http://127.0.0.1:45931/overlay?preview=1**. The `preview=1` mode cycle
 
 No DSH plugin, external website, Electron container or independent avatar server is required. Model files are stored in ignored `overlay/assets/`, never committed. The download is pinned and each asset's Git Blob hash is checked. To adjust the displayed model scale, use e.g. `/overlay?zoom=1.3`.
 
+### Slow network / TimeoutError during model installation
+
+The installer uses the system curl (respects `HTTPS_PROXY` / `ALL_PROXY`), verifies each Git blob and **keeps verified model files in `overlay/.live2d-cache/` across failed runs**. A timeout no longer forces every successful file to be downloaded again. Standard settings: 120 seconds per file, 4 attempts, 2 concurrent downloads.
+
+Start by updating the repository and rerunning the same command:
+
+```bash
+git pull
+npm run live2d:install -- --acknowledge-noncommercial
+```
+
+For slower connections, reduce parallel requests and increase the per-file timeout (seconds):
+
+```bash
+BIGFISH_DOWNLOAD_TIMEOUT=180 BIGFISH_DOWNLOAD_RETRIES=6 BIGFISH_DOWNLOAD_CONCURRENCY=1 \
+  npm run live2d:install -- --acknowledge-noncommercial
+```
+
+If you use a local HTTP proxy, launch from a terminal with its correct `HTTPS_PROXY` variable set (curl honors it). Check the real proxy port rather than copying somebody else's port. If access to `raw.githubusercontent.com` is blocked, an increased timeout alone will not resolve it.
+
+The failed original installer deleted its temporary staging files, so **downloads from before this fix cannot normally be recovered**; subsequent interrupted runs will reuse the cache. The cache remains outside Git.
+
 **Licensing**: upstream lists **上善无形 (original character), ZipZipPipe (DeepSeek derivative design), 氵六青 (Live2D model)**; their character art is marked **CC BY-NC-SA 4.0**. Use with attribution, preserve the share-alike conditions on artwork modifications, and do **not** assume commercial livestream rights from another streamer's usage. The upstream `NOTICE.md` and `PROVENANCE.md` explicitly distinguish code, model art and proprietary Live2D Cubism Core runtime. No commercial permission is granted by this installer. See [docs/live2d.md](docs/live2d.md).
 
 ## OBS: display the whale-girl Live2D character

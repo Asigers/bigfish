@@ -41,3 +41,17 @@ The BigFish SSE interface remains `GET /overlay/events`: text, emotion and task 
 The rendering code is a separate, minimal PIXI/Cubism adapter. The DSH-specific Pet desktop app and agent integration are **not** installed or embedded.
 
 **Limitations:** This project tests paths, routes, event schema and code loading in CI. It cannot certify visual quality or true Cubism animation until model assets are installed and previewed in a browser/OBS. Some phones/embedded browsers may not support the WebGL/Cubism runtime. TTS is still separately controlled by BigFish and macOS `say`.
+
+
+## Recovering from slow GitHub downloads
+
+After running `git pull`, rerun the installer. The improved installer uses macOS curl (honors HTTPS_PROXY / ALL_PROXY) with retries and a persistent, digest-checked `overlay/.live2d-cache/`. Successful downloads remain cached even if a later model texture times out.
+
+For very slow links:
+
+```bash
+BIGFISH_DOWNLOAD_TIMEOUT=180 BIGFISH_DOWNLOAD_CONCURRENCY=1 BIGFISH_DOWNLOAD_RETRIES=6 \
+  npm run live2d:install -- --acknowledge-noncommercial
+```
+
+The default is 120 seconds, 4 attempts and 2 parallel downloads. Original pre-fix downloads were staged in a temporary directory and unfortunately are usually not recoverable.
