@@ -33,7 +33,7 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     {kind:"iridium",id:"(O)645",ingredients:[{id:"(O)337",count:1},{id:"(O)787",count:1}]}
   ];
   let craftedChestKits=0;
-  const sites=[{x:4,y:7},{x:7,y:10},{x:11,y:11}];
+  const sites=[{x:4,y:7},{x:7,y:10},{x:11,y:11},{x:5,y:5}];
   const farmDrops:{x:number;y:number;itemId:string}[]=[];
   const farmResources:ResourceNode[]=[
     {x:7,y:7,kind:"twig",health:1},{x:8,y:7,kind:"stone",health:2},
