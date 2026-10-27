@@ -101,7 +101,10 @@ async function run():Promise<void>{
           // Valid world action is not enough for money/inventory policy: the deterministic
           // decision also enforces seed budgets and preservation of essential supplies.
           if(!economyTransaction.includes(d.action.type) &&
-              proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
+              proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s) &&
+              // A same-type LLM suggestion must not replace a planned itinerary hop.
+              (d.action.type!=="travel_to" ||
+                (proposed.action.type==="travel_to"&&proposed.action.target===d.action.target)))
             d=proposed;
           else if(proposed.speech) d={...d,speech:proposed.speech};
         }catch(error){console.warn("[brain] using safe plan:",error instanceof Error?error.message:String(error));}
