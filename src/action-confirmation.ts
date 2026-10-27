@@ -6,6 +6,14 @@ function stackCount(items:{id:string;count:number}[]|undefined,id:string):number
 export function actionObserved(action:Action,before:GameState,after:GameState):boolean {
   if(after.saveId!==before.saveId)return false;
   switch(action.type){
+    case "craft_chest":return before.location==="Farm" && after.location==="Farm" &&
+      (after.chestKits??0)>(before.chestKits??0) &&
+      stackCount(after.economy?.bag,"(O)388")<
+        stackCount(before.economy?.bag,"(O)388");
+    case "place_chest":return before.location==="Farm" && after.location==="Farm" &&
+      (after.chestKits??0)<(before.chestKits??0) &&
+      !before.economy?.chests.some(c=>c.x===action.x&&c.y===action.y) &&
+      after.economy?.chests.some(c=>c.x===action.x&&c.y===action.y)===true;
     case "travel_to":return after.location===action.target;
     case "clear_resource":{
       const beforeNode=before.resources?.find(n=>n.x===action.x&&n.y===action.y&&n.kind===action.kind);
