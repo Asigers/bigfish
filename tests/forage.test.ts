@@ -32,6 +32,12 @@ test("forage pickup postcondition requires visible object to disappear",()=>{
   assert.equal(actionObserved(action,base,base),false);
   assert.equal(actionObserved(action,base,{...base,forage:[]}),true);
   assert.equal(actionObserved(action,base,{...base,forage:[],saveId:"other"}),false);
+  const economy={gold:100,bag:[{id:"(O)16",count:1,category:-79,sellable:true}],
+    chests:[],shippingBin:null,shop:null,
+    tools:{hoe:true,wateringCan:true,equipped:"other",waterLeft:40}};
+  assert.equal(actionObserved(action,{...base,economy},{...base,economy,forage:[]}),false);
+  assert.equal(actionObserved(action,{...base,economy},{...base,forage:[],
+    economy:{...economy,bag:[{...economy.bag[0],count:2}]}}),true);
 });
 test("forage trip is finite, recovers alternate approach tiles, and avoids endless map ping-pong",()=>{
   const p=new ForagePlanner();
