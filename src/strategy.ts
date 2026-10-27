@@ -2,9 +2,11 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Action, ActionResult, GameState } from "./types.ts";
 import type { FarmPlan, FarmDayOutcome } from "./farm-plan.ts";
+import {validWorkProject,type FarmWorkProject} from "./farm-work.ts";
 import { DEFAULT_STRATEGY, type Strategy } from "./economy.ts";
 export type Journal = { saveId:string; dayKey:string; strategy:Strategy; entries:string[]; completed:string[];
-  farmPlan?:FarmPlan; farmOutcomes?:FarmDayOutcome[]; dailyProgress?:FarmDayOutcome };
+  farmPlan?:FarmPlan; farmOutcomes?:FarmDayOutcome[]; dailyProgress?:FarmDayOutcome;
+  workProject?:FarmWorkProject };
 const path=join(process.cwd(),"data","bigfish-memory.json");
 function validStrategy(x:unknown):x is Strategy{
   if(!x||typeof x!=="object")return false;
@@ -33,6 +35,8 @@ export class GoalMemory{
           this.journal={...x,entries:x.entries.filter(e=>typeof e==="string").slice(-40),
             completed:x.completed.filter(e=>typeof e==="string").slice(-30),
             farmPlan:this.validPlan(x.farmPlan,x.saveId,x.dayKey)?x.farmPlan:undefined,
+            workProject:validWorkProject(x.workProject)&&x.workProject.saveId===x.saveId?
+              x.workProject:undefined,
             farmOutcomes:Array.isArray(x.farmOutcomes)?
               x.farmOutcomes.filter(o=>this.validOutcome(o)).slice(-14):[],
             dailyProgress:this.validOutcome(x.dailyProgress) && x.dailyProgress.dayKey===x.dayKey?
@@ -49,6 +53,9 @@ export class GoalMemory{
       Number.isInteger(plan.targetPlots)&&plan.targetPlots>=0&&plan.targetPlots<=20 &&
       Number.isInteger(plan.occupiedPlots)&&plan.occupiedPlots>=0&&plan.occupiedPlots<=250 &&
       Array.isArray(plan.fieldTiles)&&plan.fieldTiles.length<=20 &&
+      Array.isArray(plan.protectedTiles)&&plan.protectedTiles.length<=80 &&
+      plan.protectedTiles.every(t=>Number.isInteger(t.x)&&Number.isInteger(t.y)&&
+        t.x>=0&&t.y>=0&&t.x<150&&t.y<150) &&
       plan.fieldTiles.every(t=>Number.isInteger(t.x)&&Number.isInteger(t.y)&&
         t.x>=0&&t.y>=0&&t.x<150&&t.y<150) &&
       (plan.preferredSeedId===null||
@@ -81,8 +88,16 @@ export class GoalMemory{
       entries:old?.entries??[],completed:old?.completed??[],
       farmOutcomes:completedDays.slice(-14),
       farmPlan:old?.dayKey===newKey?old.farmPlan:undefined,
+      workProject:old?.workProject,
       dailyProgress:old?.dayKey===newKey?old.dailyProgress:undefined
     };
+    await this.persist();
+  }
+  async setWorkProject(s:GameState,project:FarmWorkProject):Promise<void>{
+    if(!this.journal||this.journal.saveId!==s.saveId||project.saveId!==s.saveId||
+      !validWorkProject(project))throw Error("Invalid or cross-save farm project");
+    if(JSON.stringify(this.journal.workProject)===JSON.stringify(project))return;
+    this.journal.workProject=project;
     await this.persist();
   }
   async setFarmPlan(s:GameState,plan:FarmPlan):Promise<void>{

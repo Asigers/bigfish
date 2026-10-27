@@ -1,10 +1,12 @@
 import type { Action, ActionResult, Decision, GameState, ResourceKind, ResourceNode, Tile } from "./types.ts";
 import { actionKey } from "./types.ts";
+import type { FarmWorkProject,MaterialId } from "./farm-work.ts";
+import { readyMaterialTargets } from "./farm-work.ts";
 
 const resourceTool:Record<ResourceKind,"axe"|"pickaxe"|"scythe">={
   tree:"axe",stone:"pickaxe",twig:"axe",weed:"scythe"
 };
-const resourceItem:Record<ResourceKind,string>={
+const resourceItem:Record<ResourceKind,MaterialId>={
   tree:"(O)388",twig:"(O)388",stone:"(O)390",weed:"(O)771"
 };
 const goalCount:Record<ResourceKind,number>={
@@ -65,7 +67,7 @@ export class FarmResourcePlanner {
       if(this.allowed(s,a))return a;
     }
   }
-  propose(s:GameState,canStart:boolean):Decision|undefined {
+  propose(s:GameState,canStart:boolean,project?:FarmWorkProject):Decision|undefined {
     this.reset(s);
     if(!canStart||s.paused||s.location!=="Farm"||
       s.time>=1800||s.energy<65||s.inventoryFree<=0||!s.economy||
@@ -76,7 +78,9 @@ export class FarmResourcePlanner {
     const count=(id:string)=>bag.filter(i=>i.id===id).reduce((n,i)=>n+i.count,0) +
       s.economy!.chests.reduce((n,chest)=>n+
         chest.items.filter(i=>i.id===id).reduce((k,i)=>k+i.count,0),0);
-    const missing=(kind:ResourceKind)=>count(resourceItem[kind])<goalCount[kind];
+    const goals=readyMaterialTargets(project);
+    const missing=(kind:ResourceKind)=>count(resourceItem[kind])<
+      (goals?.[resourceItem[kind]]??goalCount[kind]);
     const available=(kind:ResourceKind)=>{
       const tool=resourceTool[kind];
       return s.economy?.tools[tool]===true &&
