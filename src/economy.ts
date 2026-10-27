@@ -64,7 +64,11 @@ export class EconomyPlanner {
       return issue(near(s,target)?act:walk(s,target),why,speech);
     };
     const seedCount=e.bag.filter(x=>x.category===-74).reduce((n,x)=>n+x.count,0);
-    const sellable=e.bag.filter(x=>x.sellable&&x.category!==-74&&x.count>0);
+    // Keep edible supplies for stamina recovery. Shipping is all-or-nothing per stack,
+    // so selling any food here could remove the last emergency meal.
+    const foodIds=new Set(s.food?.map(f=>f.id)??[]);
+    const sellable=e.bag.filter(x=>x.sellable&&x.category!==-74&&x.count>0 &&
+      !foodIds.has(x.id));
     if(s.location==="Farm"){
       // Selling has priority when money is blocked in produce, or the backpack is full.
       if(sellable.length&&e.shippingBin){
@@ -88,8 +92,10 @@ export class EconomyPlanner {
         if(a)return a;
       }
       // Free inventory using storage for non-saleable non-tool resources.
-      if(s.inventoryFree<=1&&e.chests.length){
-        const resources=e.bag.filter(x=>x.category!==-74&&!x.sellable&&x.category!==-99&&x.id.startsWith("(O)"));
+      if(s.inventoryFree<=2&&e.chests.length){
+        const resources=e.bag.filter(x=>["(O)388","(O)390","(O)771","(O)382"].includes(x.id) ||
+          (x.category!==-74&&!x.sellable&&x.category!==-99&&
+            x.id.startsWith("(O)")&&!foodIds.has(x.id)));
         if(resources.length){
           const chest=e.chests[0],item=resources[0];
           const a=interact(chest,{type:"store_item",itemId:item.id,count:item.count,x:chest.x,y:chest.y},"Free backpack space","背包太满了，先收拾一下。");
