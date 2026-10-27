@@ -15,6 +15,7 @@ export type WorldLink = { from: string; to: string };
 export type GameState = {
   saveId: string; location: string; day: number; season: string; time: number;
   energy: number; x: number; y: number; paused: boolean;
+  pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
   seeds: SeedStack[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
@@ -59,6 +60,7 @@ export function validState(input: unknown): input is GameState {
   const s=input as Partial<GameState>;
   return typeof s.saveId === "string" && s.saveId.length > 0 && s.saveId.length < 120
     && locName(s.location) && typeof s.season === "string" && typeof s.paused === "boolean"
+    && (s.pauseReason === undefined || ["none","menu","event","time_stopped"].includes(s.pauseReason))
     && ["day","time","energy","x","y","inventoryFree"].every(k => Number.isFinite(s[k as keyof GameState]))
     && coordinate({x:s.x,y:s.y}) && Number(s.day) > 0 && Number(s.day) <= 28
     && Array.isArray(s.crops) && s.crops.length <= 250 && s.crops.every(c=>coordinate(c)&&typeof c.watered==="boolean"&&typeof c.ready==="boolean")
@@ -81,6 +83,7 @@ export function stateValidationIssues(input: unknown): string[] {
   if (!locName(s.location)) issues.push("location");
   if (typeof s.season !== "string") issues.push("season");
   if (typeof s.paused !== "boolean") issues.push("paused");
+  if (s.pauseReason !== undefined && !["none","menu","event","time_stopped"].includes(s.pauseReason as string)) issues.push("pauseReason");
   for (const k of numberFields) if (!Number.isFinite(s[k])) issues.push(k);
   if (!coordinate({x: s.x, y: s.y})) issues.push("player coordinates");
   if (typeof s.day !== "number" || s.day <= 0 || s.day > 28) issues.push("day range");
