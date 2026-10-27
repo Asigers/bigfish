@@ -26,7 +26,7 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -41,6 +41,8 @@ export type Action =
   | { type: "equip_tool"; tool: "hoe" | "watering_can" | "axe" | "pickaxe" | "scythe" }
   | { type: "refill_watering_can" | "collect_forage"; x: number; y: number }
   | { type:"clear_resource"; x:number; y:number; kind:ResourceKind }
+  | { type: "craft_chest" }
+  | { type: "place_chest"; x:number; y:number }
   | { type: "sleep" }
   | { type: "wait"; seconds: number };
 export type Command = Exclude<Action, { type: "wait" }> & { id: string; saveId: string; day: number; location: string };
@@ -93,6 +95,10 @@ export function validState(input: unknown): input is GameState {
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
+    && (s.chestKits===undefined || (Number.isInteger(s.chestKits)&&s.chestKits>=0&&s.chestKits<=9999))
+    && (s.canCraftChest===undefined || typeof s.canCraftChest==="boolean")
+    && (s.placementSites===undefined || (Array.isArray(s.placementSites) &&
+      s.placementSites.length<=80 && s.placementSites.every(coordinate)))
     && (s.cropCatalog===undefined || (Array.isArray(s.cropCatalog) &&
       s.cropCatalog.length<=150 && s.cropCatalog.every(c=>validCropInfo(c))))
     && (s.forage === undefined || (Array.isArray(s.forage) && s.forage.length <= 80 &&
@@ -140,6 +146,9 @@ export function stateValidationIssues(input: unknown): string[] {
       (typeof (v as CropTile).seedId==="string" &&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as CropTile).seedId!))));
   if(s.cropCatalog!==undefined)checkArray("cropCatalog",150,validCropInfo);
+  if(s.chestKits!==undefined && (!Number.isInteger(s.chestKits)||s.chestKits<0||s.chestKits>9999))issues.push("chestKits");
+  if(s.canCraftChest!==undefined && typeof s.canCraftChest!=="boolean")issues.push("canCraftChest");
+  if(s.placementSites!==undefined)checkArray("placementSites",80,coordinate);
   checkArray("emptyPlots", 250, v => coordinate(v) && typeof (v as PlotTile).watered === "boolean");
   checkArray("tillable", 250, coordinate);
   checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
