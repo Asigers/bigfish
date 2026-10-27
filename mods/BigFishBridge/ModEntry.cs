@@ -85,11 +85,7 @@ public sealed class ModEntry : Mod
             cachedWaterSources = null;
             if (active != null) Finish(active, false, "returned to title");
             while (incoming.TryDequeue(out _)) { }
-            lock (seenCommandIds)
-            {
-                seenCommandIds.Clear();
-                seenCommandOrder.Clear();
-            }
+            // Preserve recently seen command IDs even after returning to title; do not replay them.
         };
         Monitor.Log("BigFish experimental agent bridge loaded. BACK UP your save.", LogLevel.Info);
     }
