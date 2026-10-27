@@ -57,8 +57,8 @@ export function parseDecision(raw:string):Decision {
     }
   else if(a.type==="travel_to"&&typeof a.target==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(a.target))
     action={type:"travel_to",target:a.target};
-  else if((a.type==="ship_item")&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId))
-    action={type:"ship_item",itemId:a.itemId};
+  else if((a.type==="ship_item"||a.type==="eat_food")&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId))
+    action={type:a.type as "ship_item"|"eat_food",itemId:a.itemId};
   else if(a.type==="buy_seed"&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId)&&Number.isInteger(a.count)&&Number(a.count)>0&&Number(a.count)<=12)
     action={type:"buy_seed",itemId:a.itemId,count:Number(a.count)};
   else if(["store_item","withdraw_item"].includes(String(a.type))&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId)&&Number.isInteger(a.count)&&Number(a.count)>0&&Number(a.count)<=9999&&Number.isInteger(a.x)&&Number.isInteger(a.y))
@@ -176,6 +176,8 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
     const shop=s.economy?.shop;
     return s.location==="SeedShop"&&Boolean(shop?.open&&shop.offers.some(o=>o.id===a.itemId&&o.price*a.count<=s.economy!.gold&&(o.stock<0||o.stock>=a.count))&&close(here,shop.keeper));
   }
+  if(a.type==="eat_food")return Boolean(s.food?.some(f=>f.id===a.itemId&&f.count>0&&
+      f.restoreEnergy>0) && s.energy<=80 && s.time<2200 && s.economy);
   if(a.type==="ship_item"){
     const e=s.economy;
     return s.location==="Farm"&&Boolean(e?.shippingBin&&close(here,e.shippingBin)&&e.bag.some(i=>i.id===a.itemId&&i.sellable));
