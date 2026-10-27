@@ -116,7 +116,7 @@ test("watering proof requires non-rainy next morning and real wet covered crop",
     undefined,added)?.status,"installed");
   assert.equal(reconcileSprinkler({...next,time:1030},undefined,added)?.status,"installed");
   assert.equal(reconcileSprinkler({...next,installedSprinklers:[]},undefined,added)?.status,
-    "materials_needed");
+    "ready_to_craft");
 });
 test("real investment goal survives restart and never leaks to a different save",async()=>{
   const dir=await mkdtemp(join(tmpdir(),"bigfish-irrigation-"));
