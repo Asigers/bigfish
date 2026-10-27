@@ -44,6 +44,9 @@ public sealed class ModEntry : Mod
     private ModConfig config = new();
     private RemoteCommand? active;
     private DateTime movementStarted;
+    private DateTime dropStartedAt;
+    private string dropItemId = "";
+    private int dropBagBefore;
     private DateTime foodStartedAt;
     private float foodEnergyBefore;
     private string foodItemId = "";
@@ -182,6 +185,23 @@ public sealed class ModEntry : Mod
         return null;
     }
 
+    private static readonly HashSet<string> CollectibleDropIds =
+        new() { "(O)388", "(O)390", "(O)771", "(O)382", "(O)92" };
+    private static string? ResourceDropId(Debris debris)
+    {
+        if (debris.debrisType.Value != Debris.DebrisType.OBJECT &&
+            debris.debrisType.Value != Debris.DebrisType.RESOURCE) return null;
+        var id = debris.item?.QualifiedItemId ?? debris.itemId.Value;
+        return id != null && CollectibleDropIds.Contains(id) ? id : null;
+    }
+    private static Point? DropPosition(Debris debris)
+    {
+        if (debris.Chunks.Count == 0) return null;
+        var pos = debris.Chunks[0].position.Value;
+        if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y)) return null;
+        return new Point((int)Math.Floor(pos.X / 64f), (int)Math.Floor(pos.Y / 64f));
+    }
+
     private static bool SafeResourceTree(Tree tree) =>
         tree.growthStage.Value >= 5 && !tree.tapped.Value &&
         !tree.stump.Value && tree.health.Value > 0;
@@ -285,6 +305,16 @@ public sealed class ModEntry : Mod
             .Select(pair => new { x = (int)pair.Key.X, y = (int)pair.Key.Y,
                 itemId = pair.Value.QualifiedItemId })
             .ToArray();
+        var drops = loc.debris
+            .Select(d => new { debris = d, pos = DropPosition(d), id = ResourceDropId(d) })
+            .Where(d => d.pos.HasValue && d.id != null &&
+                d.pos.Value.X >= 0 && d.pos.Value.Y >= 0 &&
+                d.pos.Value.X < 150 && d.pos.Value.Y < 150)
+            .OrderBy(d => Math.Abs(d.pos!.Value.X - player.TilePoint.X) +
+                Math.Abs(d.pos!.Value.Y - player.TilePoint.Y))
+            .Take(80)
+            .Select(d => new { x = d.pos!.Value.X, y = d.pos!.Value.Y, itemId = d.id! })
+            .ToArray();
         var seeds = player.Items.Where(i => i != null && i.Category == -74 && i.QualifiedItemId.StartsWith("(O)"))
             .GroupBy(i => i!.QualifiedItemId)
             .Take(60)
@@ -376,7 +406,7 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, food, forage, resources, exits, worldLinks = links, waterSources,
+            crops, emptyPlots, tillable, seeds, food, forage, resources, drops, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
@@ -422,6 +452,62 @@ public sealed class ModEntry : Mod
                 }
                 active = cmd;
                 BeginMovement(new Point(activeExit.X, activeExit.Y));
+                return;
+            }
+            if (cmd.Type == "pickup_drop")
+            {
+                if (cmd.X < 0 || cmd.Y < 0 || cmd.X >= 150 || cmd.Y >= 150 ||
+                    !CollectibleDropIds.Contains(cmd.ItemId) || player.freeSpotsInInventory() < 1)
+                { Finish(cmd, false, "invalid drop or full backpack"); return; }
+                var target = loc.debris.Select(d => new { debris = d, pos = DropPosition(d) })
+                    .FirstOrDefault(d => ResourceDropId(d.debris) == cmd.ItemId &&
+                        d.pos.HasValue &&
+                        Math.Abs(d.pos.Value.X - cmd.X) <= 2 &&
+                        Math.Abs(d.pos.Value.Y - cmd.Y) <= 2);
+                if (target == null)
+                { Finish(cmd, false, "matching world drop not present"); return; }
+                dropItemId = cmd.ItemId;
+                dropBagBefore = player.Items
+                    .Where(i => i?.QualifiedItemId == cmd.ItemId).Sum(i => i!.Stack);
+                dropStartedAt = DateTime.UtcNow;
+                active = cmd;
+                var point = target.pos!.Value;
+                // Native debris attraction/pickup runs in GameLocation.Update;
+                // approaching it is enough. Never invoke Debris.collect() manually.
+                var candidates = new List<Point> { point };
+                for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    candidates.Add(new Point(point.X + dx, point.Y + dy));
+                }
+                bool pathFound = false;
+                foreach (var candidate in candidates.OrderBy(c =>
+                    Math.Abs(c.X - player.TilePoint.X) + Math.Abs(c.Y - player.TilePoint.Y)))
+                {
+                    if (candidate.X < 0 || candidate.Y < 0 ||
+                        !loc.isTileOnMap(candidate.X, candidate.Y)) continue;
+                    if (candidate == player.TilePoint)
+                    {
+                        movementDestination = candidate;
+                        movementStarted = DateTime.UtcNow;
+                        player.controller = null;
+                        pathFound = true;
+                        break;
+                    }
+                    var controller = new PathFindController(player, loc, candidate, 2, false);
+                    if (controller.pathToEndPoint == null || controller.pathToEndPoint.Count == 0)
+                        continue;
+                    movementDestination = candidate;
+                    movementStarted = DateTime.UtcNow;
+                    player.controller = controller;
+                    pathFound = true;
+                    break;
+                }
+                if (!pathFound)
+                { Finish(cmd, false, "no reachable drop pickup position"); return; }
+                Monitor.Log("Approaching native drop " + cmd.ItemId +
+                    " at (" + point.X + "," + point.Y + ")", LogLevel.Info);
                 return;
             }
             if (cmd.Type == "move_to")
@@ -794,6 +880,23 @@ public sealed class ModEntry : Mod
         if (active == null) return;
         var cmd = active;
         var player = Game1.player;
+        if (cmd.Type == "pickup_drop")
+        {
+            var count = player.Items.Where(i => i?.QualifiedItemId == dropItemId)
+                .Sum(i => i!.Stack);
+            if (count > dropBagBefore)
+            {
+                player.controller = null;
+                Finish(cmd, true, "native pickup verified by inventory increase");
+                return;
+            }
+            if ((DateTime.UtcNow - dropStartedAt).TotalSeconds > 12)
+            {
+                player.controller = null;
+                Finish(cmd, false, "drop was not collected within 12 seconds");
+            }
+            return;
+        }
         if (cmd.Type == "eat_food")
         {
             if (player.Stamina > foodEnergyBefore)
