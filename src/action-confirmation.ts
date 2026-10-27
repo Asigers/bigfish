@@ -7,9 +7,15 @@ export function actionObserved(action:Action,before:GameState,after:GameState):b
   if(after.saveId!==before.saveId)return false;
   switch(action.type){
     case "travel_to":return after.location===action.target;
-    case "collect_forage":return after.location===before.location &&
-      before.forage?.some(f=>f.x===action.x&&f.y===action.y)===true &&
-      !after.forage?.some(f=>f.x===action.x&&f.y===action.y);
+    case "collect_forage":{
+      const item=before.forage?.find(f=>f.x===action.x&&f.y===action.y);
+      return after.location===before.location && item!==undefined &&
+        after.forage!==undefined &&
+        !after.forage.some(f=>f.x===action.x&&f.y===action.y) &&
+        (before.economy===undefined || after.economy===undefined ||
+          stackCount(after.economy.bag,item.itemId)>
+            stackCount(before.economy.bag,item.itemId));
+    }
     case "move_to":return after.location===before.location && after.x===action.x && after.y===action.y;
     case "sleep":return after.day!==before.day || after.season!==before.season;
     case "equip_tool":return after.economy?.tools.equipped===action.tool;
