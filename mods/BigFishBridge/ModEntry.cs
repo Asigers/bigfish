@@ -48,7 +48,11 @@ public sealed class ModEntry : Mod
     private Point movementDestination;
     private bool polling;
     private bool posting;
-    private string lastPolledId = "";
+    private readonly HashSet<string> seenCommandIds = new();
+    private readonly Queue<string> seenCommandOrder = new();
+    private sealed record CommandReceipt(string Id, bool Ok, string Message);
+    private readonly ConcurrentQueue<CommandReceipt> outboundResults = new();
+    private int resultPosting;
     private Warp? activeExit;
     private bool sleeping;
     private List<Point>? cachedWaterSources;
@@ -81,14 +85,24 @@ public sealed class ModEntry : Mod
             cachedWaterSources = null;
             if (active != null) Finish(active, false, "returned to title");
             while (incoming.TryDequeue(out _)) { }
-            lastPolledId = "";
+            lock (seenCommandIds)
+            {
+                seenCommandIds.Clear();
+                seenCommandOrder.Clear();
+            }
         };
         Monitor.Log("BigFish experimental agent bridge loaded. BACK UP your save.", LogLevel.Info);
     }
 
     private void OnTick(object? sender, UpdateTickedEventArgs e)
     {
-        if (client == null || !Context.IsWorldReady || !Context.IsMainPlayer) return;
+        if (client == null) return;
+        // A command may finish while a location is transitioning or the title menu opens.
+        // Keep sending its receipt even when the world is temporarily unavailable.
+        if (e.IsMultipleOf(30) && !outboundResults.IsEmpty &&
+            Interlocked.CompareExchange(ref resultPosting, 1, 0) == 0)
+            _ = FlushResultsAsync();
+        if (!Context.IsWorldReady || !Context.IsMainPlayer) return;
         if (e.IsMultipleOf(40) && !posting)
         {
             try
@@ -276,6 +290,9 @@ public sealed class ModEntry : Mod
             shippingBin = bin.HasValue ? new { x = (int)bin.Value.X, y = (int)bin.Value.Y } : null,
             shop, tools
         };
+        var pauseReason = Game1.activeClickableMenu != null ? "menu" :
+            Game1.eventUp ? "event" :
+            !Game1.shouldTimePass() ? "time_stopped" : "none";
         return new
         {
             economy,
@@ -283,7 +300,7 @@ public sealed class ModEntry : Mod
             location = loc.Name,
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
-            paused = Game1.activeClickableMenu != null || Game1.eventUp || !Game1.shouldTimePass(),
+            paused = pauseReason != "none", pauseReason,
             crops, emptyPlots, tillable, seeds, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
@@ -662,7 +679,8 @@ public sealed class ModEntry : Mod
             activeExit = null;
             sleeping = false;
         }
-        if (client != null) _ = SendResultAsync(new { id = cmd.Id, ok, message });
+        // Enqueue on the game thread; do not lose a completed command on transient HTTP errors.
+        outboundResults.Enqueue(new CommandReceipt(cmd.Id, ok, message));
     }
 
     private async Task PostStateAsync(object snapshot)
@@ -690,16 +708,47 @@ public sealed class ModEntry : Mod
             var obj = json.RootElement.GetProperty("command");
             if (obj.ValueKind != JsonValueKind.Object) return;
             var cmd = obj.Deserialize<RemoteCommand>(JsonOptions);
-            if (cmd == null || string.IsNullOrWhiteSpace(cmd.Id) || cmd.Id == lastPolledId) return;
-            lastPolledId = cmd.Id;
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.Id)) return;
+            lock (seenCommandIds)
+            {
+                if (!seenCommandIds.Add(cmd.Id)) return;
+                seenCommandOrder.Enqueue(cmd.Id);
+                while (seenCommandOrder.Count > 256)
+                    seenCommandIds.Remove(seenCommandOrder.Dequeue());
+            }
             incoming.Enqueue(cmd);
         }
         catch (Exception ex) { Monitor.Log("Poll: " + ex.Message, LogLevel.Trace); }
         finally { polling = false; }
     }
-    private async Task SendResultAsync(object result)
+    private async Task FlushResultsAsync()
     {
-        try { using var res = await client!.PostAsJsonAsync("/result", result); res.EnsureSuccessStatusCode(); }
-        catch (Exception ex) { Monitor.Log("Result sync: " + ex.Message, LogLevel.Warn); }
+        try
+        {
+            if (!outboundResults.TryPeek(out var receipt)) return;
+            using var res = await client!.PostAsJsonAsync("/result",
+                new { id = receipt.Id, ok = receipt.Ok, message = receipt.Message });
+            if (res.IsSuccessStatusCode)
+            {
+                outboundResults.TryDequeue(out _);
+                return;
+            }
+            if (res.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                // The controller may have restarted and no longer know this command ID.
+                // Do not block future receipts forever, but make the loss visible.
+                Monitor.Log("Controller rejected stale result for " + receipt.Id +
+                    " (HTTP 409); verify game state before continuing", LogLevel.Warn);
+                outboundResults.TryDequeue(out _);
+                return;
+            }
+            Monitor.Log("Result delivery rejected (HTTP " + (int)res.StatusCode +
+                "); will retry", LogLevel.Warn);
+        }
+        catch (Exception ex)
+        {
+            Monitor.Log("Result delivery failed; will retry: " + ex.Message, LogLevel.Trace);
+        }
+        finally { Interlocked.Exchange(ref resultPosting, 0); }
     }
 }
