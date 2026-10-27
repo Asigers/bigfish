@@ -5,6 +5,7 @@ import { Autopilot, validateAgainstWorld } from "./decision.ts";
 import { PiBrain } from "./brain.ts";
 import { EconomyPlanner, DEFAULT_STRATEGY } from "./economy.ts";
 import { ForagePlanner } from "./forage.ts";
+import { FarmResourcePlanner } from "./resources.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
@@ -20,6 +21,7 @@ const brain=mock?undefined:new PiBrain();
 const planner=new Autopilot();
 const economy=new EconomyPlanner();
 const forager=new ForagePlanner();
+const resourcePlanner=new FarmResourcePlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
@@ -44,6 +46,11 @@ function requiredTool(state:GameState,action:Action):Action|undefined{
   if(action.type==="till_tile"){
     if(!tools.hoe)return {type:"wait",seconds:8};
     if(tools.equipped!=="hoe")return {type:"equip_tool",tool:"hoe"};
+  }
+  if(action.type==="clear_resource"){
+    const tool=action.kind==="stone"?"pickaxe":action.kind==="weed"?"scythe":"axe";
+    if(tools[tool]!==true)return {type:"wait",seconds:8};
+    if(tools.equipped!==tool)return {type:"equip_tool",tool};
   }
 }
 async function say(text:string,action:Action,goal:string,ok=true):Promise<void>{
@@ -87,6 +94,7 @@ async function run():Promise<void>{
         planner.observe(pending.before,[failedReceipt],pending.action);
         economy.update(pending.before,pending.action,false);
         forager.observe(pending.before,pending.action,failedReceipt);
+        resourcePlanner.observe(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
         unconfirmed=undefined;
@@ -94,6 +102,10 @@ async function run():Promise<void>{
         actionObserved(pending.action,pending.before,s)){
         if(pending.commandId && uncertain?.cmd.id===pending.commandId)
           bridge.settleUncertain(pending.commandId,"observed");
+        // A command whose result was lost still consumed the day's action budget.
+        if(pending.action.type==="clear_resource")
+          resourcePlanner.observe(pending.before,pending.action,{
+            id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
       }else{
@@ -135,7 +147,11 @@ async function run():Promise<void>{
       const canBeginForage=!economic && s.location==="Farm" &&
         d.action.type==="travel_to" && d.action.target==="FarmHouse" &&
         s.time<2000 && s.energy>45;
-      if(!economic && (forager.isActive || canBeginForage)){
+      // Work on immediate, measured materials before setting out for longer foraging.
+      const resourceDecision=canBeginForage && !forager.isActive ?
+        resourcePlanner.propose(s,true) : undefined;
+      if(resourceDecision){d=resourceDecision;forageChosen=true;}
+      if(!economic && !resourceDecision && (forager.isActive || canBeginForage)){
         const forageDecision=forager.propose(s,canBeginForage);
         if(forageDecision){d=forageDecision;forageChosen=true;}
       }
@@ -212,6 +228,7 @@ async function run():Promise<void>{
         planner.observe(s,[result],action);
         economy.update(s,action,result.ok);
         forager.observe(s,action,result);
+        resourcePlanner.observe(s,action,result);
       }
     }
   }

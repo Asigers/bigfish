@@ -7,10 +7,13 @@ export type ShopOffer = { id: string; price: number; stock: number };
 export type EconomyState = {
   gold: number; bag: BagItem[]; chests: ChestSnapshot[]; shippingBin: Tile | null;
   shop: { keeper: Tile; open: boolean; offers: ShopOffer[] } | null;
-  tools: { hoe: boolean; wateringCan: boolean; equipped: string; waterLeft: number };
+  tools: { hoe: boolean; wateringCan: boolean; equipped: string; waterLeft: number;
+    axe?:boolean; pickaxe?:boolean; scythe?:boolean };
 };
 export type SeedStack = { id: string; count: number };
 export type ForageItem = Tile & { itemId: string };
+export type ResourceKind = "tree" | "stone" | "twig" | "weed";
+export type ResourceNode = Tile & { kind:ResourceKind; health:number };
 export type Exit = Tile & { target: string };
 export type WorldLink = { from: string; to: string };
 export type GameState = {
@@ -18,7 +21,7 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; forage?: ForageItem[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; forage?: ForageItem[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -29,8 +32,9 @@ export type Action =
   | { type: "ship_item"; itemId: string }
   | { type: "buy_seed"; itemId: string; count: number }
   | { type: "store_item" | "withdraw_item"; x: number; y: number; itemId: string; count: number }
-  | { type: "equip_tool"; tool: "hoe" | "watering_can" }
+  | { type: "equip_tool"; tool: "hoe" | "watering_can" | "axe" | "pickaxe" | "scythe" }
   | { type: "refill_watering_can" | "collect_forage"; x: number; y: number }
+  | { type:"clear_resource"; x:number; y:number; kind:ResourceKind }
   | { type: "sleep" }
   | { type: "wait"; seconds: number };
 export type Command = Exclude<Action, { type: "wait" }> & { id: string; saveId: string; day: number; location: string };
@@ -71,6 +75,9 @@ export function validState(input: unknown): input is GameState {
     && (s.forage === undefined || (Array.isArray(s.forage) && s.forage.length <= 80 &&
       s.forage.every(f=>coordinate(f)&&typeof f.itemId==="string"&&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(f.itemId))))
+    && (s.resources === undefined || (Array.isArray(s.resources) && s.resources.length <= 120 &&
+      s.resources.every(n => coordinate(n) && ["tree","stone","twig","weed"].includes(n.kind) &&
+        Number.isFinite(n.health) && n.health>=0 && n.health<=1000)))
     && Array.isArray(s.exits) && s.exits.length <= 50 && s.exits.every(validExit)
     && Array.isArray(s.worldLinks) && s.worldLinks.length <= 300 && s.worldLinks.every(c=>record(c)&&locName(c.from)&&locName(c.to))
     && (s.bed === null || coordinate(s.bed))
@@ -106,6 +113,11 @@ export function stateValidationIssues(input: unknown): string[] {
     checkArray("forage", 80, v => coordinate(v) && record(v) &&
       typeof (v as ForageItem).itemId === "string" &&
       /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as ForageItem).itemId));
+  if(s.resources !== undefined)
+    checkArray("resources",120, v=>coordinate(v) &&
+      ["tree","stone","twig","weed"].includes((v as ResourceNode).kind) &&
+      Number.isFinite((v as ResourceNode).health) &&
+      (v as ResourceNode).health>=0 && (v as ResourceNode).health<=1000);
   checkArray("exits", 50, validExit);
   checkArray("worldLinks", 300, v => record(v) && locName(v.from) && locName(v.to));
   if (s.bed !== null && !coordinate(s.bed)) issues.push("bed");
@@ -130,5 +142,7 @@ export function validEconomy(value:unknown):value is EconomyState {
         && Number.isInteger(o.price)&&o.price>0&&o.price<=1_000_000
         && Number.isInteger(o.stock)&&o.stock>=-1)))
     && record(e.tools)&&typeof e.tools.hoe==="boolean"&&typeof e.tools.wateringCan==="boolean"
+    && ["axe","pickaxe","scythe"].every(k=>(e.tools as unknown as Record<string,unknown>)[k]===undefined||
+      typeof (e.tools as unknown as Record<string,unknown>)[k]==="boolean")
     && typeof e.tools.equipped==="string"&&e.tools.equipped.length<40&&Number.isFinite(e.tools.waterLeft);
 }
