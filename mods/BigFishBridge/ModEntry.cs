@@ -168,6 +168,19 @@ public sealed class ModEntry : Mod
         warp.X >= 0 && warp.Y >= 0 && warp.X < 256 && warp.Y < 256 &&
         ValidMapName(warp.TargetName);
 
+    private static string? DebrisKind(SObject obj)
+    {
+        if (obj.IsSpawnedObject || obj.bigCraftable.Value) return null;
+        if (obj.IsBreakableStone()) return "stone";
+        if (obj.IsTwig()) return "twig";
+        if (obj.IsWeeds()) return "weed";
+        return null;
+    }
+
+    private static bool SafeResourceTree(Tree tree) =>
+        tree.growthStage.Value >= 5 && !tree.tapped.Value &&
+        !tree.stump.Value && tree.health.Value > 0;
+
     private object Snapshot()
     {
         var player = Game1.player;
@@ -221,6 +234,39 @@ public sealed class ModEntry : Mod
                 if (loc.doesTileHaveProperty(x, y, "Diggable", "Back") == null) continue;
                 if (!loc.CanItemBePlacedHere(tile, itemIsPassable: true)) continue;
                 tillable.Add(new { x, y });
+            }
+        }
+        // Bounded farm resource scan: no placed machines, paths, buildings, crops,
+        // fruit trees, tapper trees, young trees, stumps or map-specific setpieces.
+        var resources = new List<object>();
+        if (loc.Name == "Farm")
+        {
+            foreach (var pair in loc.terrainFeatures.Pairs
+                .OrderBy(p => Math.Abs(p.Key.X - player.TilePoint.X) +
+                    Math.Abs(p.Key.Y - player.TilePoint.Y)))
+            {
+                if (pair.Value is not Tree tree || !SafeResourceTree(tree)) continue;
+                if (pair.Key.X < 0 || pair.Key.Y < 0 ||
+                    pair.Key.X >= 150 || pair.Key.Y >= 150) continue;
+                resources.Add(new { x = (int)pair.Key.X, y = (int)pair.Key.Y,
+                    kind = "tree", health = (double)tree.health.Value });
+                if (resources.Count >= 90) break;
+            }
+            foreach (var pair in loc.objects.Pairs
+                .OrderBy(p => Math.Abs(p.Key.X - player.TilePoint.X) +
+                    Math.Abs(p.Key.Y - player.TilePoint.Y)))
+            {
+                if (resources.Count >= 120) break;
+                var kind = pair.Value is SObject obj ? DebrisKind(obj) : null;
+                if (kind == null || pair.Key.X < 0 || pair.Key.Y < 0 ||
+                    pair.Key.X >= 150 || pair.Key.Y >= 150) continue;
+                // Scythe swings have an area of effect; never target weeds close to crops.
+                if (kind == "weed" && loc.terrainFeatures.Pairs.Any(p =>
+                    p.Value is HoeDirt dirt && dirt.crop != null &&
+                    Math.Abs(p.Key.X - pair.Key.X) <= 2 &&
+                    Math.Abs(p.Key.Y - pair.Key.Y) <= 2)) continue;
+                resources.Add(new { x = (int)pair.Key.X, y = (int)pair.Key.Y,
+                    kind, health = (double)Math.Max(0, pair.Value.MinutesUntilReady) });
             }
         }
         // Only spawned forage objects are collectible. Never infer rocks, machines, or
@@ -289,8 +335,16 @@ public sealed class ModEntry : Mod
         } : null;
         var hoeTool = player.Items.OfType<Hoe>().FirstOrDefault();
         var waterTool = player.Items.OfType<WateringCan>().FirstOrDefault();
+        var axeTool = player.Items.OfType<Axe>().FirstOrDefault();
+        var pickaxeTool = player.Items.OfType<Pickaxe>().FirstOrDefault();
+        var scytheTool = player.Items.OfType<MeleeWeapon>().FirstOrDefault(w => w.isScythe());
         var tools = new { hoe = hoeTool != null, wateringCan = waterTool != null,
-            equipped = player.CurrentTool is Hoe ? "hoe" : player.CurrentTool is WateringCan ? "watering_can" : "other",
+            axe = axeTool != null, pickaxe = pickaxeTool != null, scythe = scytheTool != null,
+            equipped = player.CurrentTool is Hoe ? "hoe" :
+                player.CurrentTool is WateringCan ? "watering_can" :
+                player.CurrentTool is Axe ? "axe" :
+                player.CurrentTool is Pickaxe ? "pickaxe" :
+                player.CurrentTool is MeleeWeapon mw && mw.isScythe() ? "scythe" : "other",
             waterLeft = waterTool?.WaterLeft ?? 0 };
         var economy = new {
             gold = player.Money, bag, chests,
@@ -308,7 +362,7 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, forage, exits, worldLinks = links, waterSources,
+            crops, emptyPlots, tillable, seeds, forage, resources, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
@@ -398,11 +452,64 @@ public sealed class ModEntry : Mod
             }
             if (cmd.Type == "equip_tool")
             {
-                var index = player.Items.ToList().FindIndex(i => cmd.Tool == "hoe" ? i is Hoe :
-                    cmd.Tool == "watering_can" && i is WateringCan);
+                var index = player.Items.ToList().FindIndex(i => cmd.Tool switch
+                {
+                    "hoe" => i is Hoe,
+                    "watering_can" => i is WateringCan,
+                    "axe" => i is Axe,
+                    "pickaxe" => i is Pickaxe,
+                    "scythe" => i is MeleeWeapon weapon && weapon.isScythe(),
+                    _ => false
+                });
                 if (index < 0) { Finish(cmd, false, "tool not found"); return; }
                 player.CurrentToolIndex = index;
                 Finish(cmd, true, "equipped " + cmd.Tool);
+                return;
+            }
+            if (cmd.Type == "clear_resource")
+            {
+                if (loc.Name != "Farm" || player.Stamina < 45 ||
+                    cmd.X < 0 || cmd.Y < 0 || cmd.X >= 150 || cmd.Y >= 150 ||
+                    !Near(player.TilePoint, cmd.X, cmd.Y))
+                { Finish(cmd, false, "unsafe resource action: farm, energy or proximity"); return; }
+                var resourceTile = new Vector2(cmd.X, cmd.Y);
+                if (cmd.Target == "tree")
+                {
+                    if (!loc.terrainFeatures.TryGetValue(resourceTile, out var feature) ||
+                        feature is not Tree tree || !SafeResourceTree(tree) ||
+                        player.CurrentTool is not Axe axe)
+                    { Finish(cmd, false, "tree absent, protected or axe not equipped"); return; }
+                    var previousHealth = tree.health.Value;
+                    axe.DoFunction(loc, cmd.X * 64 + 32, cmd.Y * 64 + 32, 1, player);
+                    var progress = !loc.terrainFeatures.TryGetValue(resourceTile, out var now) ||
+                        now is not Tree grown || grown.stump.Value ||
+                        grown.health.Value < previousHealth;
+                    Finish(cmd, progress, progress ? "tree hit confirmed" : "tree did not take damage");
+                    return;
+                }
+                if (!loc.objects.TryGetValue(resourceTile, out var item) ||
+                    item is not SObject debris || DebrisKind(debris) != cmd.Target)
+                { Finish(cmd, false, "resource not present or kind changed"); return; }
+                if (cmd.Target == "weed" &&
+                    loc.terrainFeatures.Pairs.Any(p => p.Value is HoeDirt dirt &&
+                        dirt.crop != null && Math.Abs(p.Key.X - cmd.X) <= 2 &&
+                        Math.Abs(p.Key.Y - cmd.Y) <= 2))
+                { Finish(cmd, false, "weed too close to planted crops"); return; }
+                var requiredTool = cmd.Target switch
+                {
+                    "stone" => player.CurrentTool is Pickaxe,
+                    "twig" => player.CurrentTool is Axe,
+                    "weed" => player.CurrentTool is MeleeWeapon w && w.isScythe(),
+                    _ => false
+                };
+                if (!requiredTool)
+                { Finish(cmd, false, "matching resource tool not equipped"); return; }
+                var previousDurability = debris.MinutesUntilReady;
+                player.CurrentTool!.DoFunction(loc, cmd.X * 64 + 32, cmd.Y * 64 + 32, 1, player);
+                var changed = !loc.objects.TryGetValue(resourceTile, out var next) ||
+                    next != item || next.MinutesUntilReady < previousDurability;
+                Finish(cmd, changed, changed ? "resource tool strike confirmed" :
+                    "resource unchanged by tool strike");
                 return;
             }
             if (HandleEconomy(cmd, player, loc)) return;
