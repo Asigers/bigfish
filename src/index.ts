@@ -12,6 +12,7 @@ import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
 import { actionObserved } from "./action-confirmation.ts";
+import { buildFarmPlan } from "./farm-plan.ts";
 import type { Action, ActionResult, Decision, GameState } from "./types.ts";
 
 const demo=process.argv.includes("--demo");
@@ -101,6 +102,7 @@ async function run():Promise<void>{
         resourcePlanner.observe(pending.before,pending.action,failedReceipt);
         foodPlanner.observe(pending.before,pending.action,failedReceipt);
         dropPlanner.observe(pending.before,pending.action,failedReceipt);
+        await memory.recordFarmResult(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
         unconfirmed=undefined;
@@ -118,6 +120,8 @@ async function run():Promise<void>{
         if(pending.action.type==="pickup_drop")
           dropPlanner.observe(pending.before,pending.action,{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
+        await memory.recordFarmResult(pending.before,pending.action,{
+          id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
       }else{
@@ -138,22 +142,46 @@ async function run():Promise<void>{
     if(pendingViewerEvents.length>30)pendingViewerEvents.splice(0,pendingViewerEvents.length-30);
     let action:Action|undefined;
     let result:ActionResult|undefined;
+    let stateConfirmed=false;
     try {
       if(memory.needsPlanning(s)){
         let plan=memory.get()?.saveId===s.saveId?memory.get()!.strategy:DEFAULT_STRATEGY;
         if(brain) {
-          try{plan=await brain.planStrategy(s,memory.get()?.entries??[]);}
+          try{
+            const outcomes=memory.get()?.saveId===s.saveId?
+              memory.get()?.farmOutcomes??[]:[];
+            plan=await brain.planStrategy(s,[
+              ...(memory.get()?.entries??[]),
+              ...outcomes.slice(-3).map(o=>
+                "Observed farm outcome: "+JSON.stringify(o))
+            ]);
+          }
           catch(error){console.warn("[strategy] fallback",error instanceof Error?error.message:String(error));}
         }
         await memory.startDay(s,plan);
         await say("新的一天，本鲸的目标是："+plan.notes,{type:"wait",seconds:1},plan.goal);
       }
       const goal=memory.get()?.strategy??DEFAULT_STRATEGY;
+      if(s.location==="Farm" && s.cropCatalog?.length &&
+        (!memory.get()?.farmPlan ||
+          memory.get()?.farmPlan?.dayKey!==s.season+":"+s.day)){
+        const oldOutcomes=memory.get()?.farmOutcomes??[];
+        const built=buildFarmPlan(s,goal,oldOutcomes.at(-1));
+        if(built){
+          await memory.setFarmPlan(s,built);
+          console.log("[farm-plan]",JSON.stringify({
+            day:built.dayKey,targetPlots:built.targetPlots,preferredSeedId:built.preferredSeedId,
+            topCrops:built.crops.slice(0,3),revision:built.revision
+          }));
+        }
+      }
+      await memory.observeFarmOccupancy(s);
+      const field=memory.get()?.farmPlan;
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
       const foodNeed=foodPlanner.propose(s);
-      const economic=foodNeed?undefined:economy.propose(s,goal);
-      let d:Decision=foodNeed??economic??planner.decide(s);
+      const economic=foodNeed?undefined:economy.propose(s,goal,field);
+      let d:Decision=foodNeed??economic??planner.decide(s,field);
       let forageChosen=Boolean(foodNeed);
       // Productive gathering begins only after farming and financial errands have
       // no action; once started, the trip continues across maps until bounded.
@@ -179,13 +207,10 @@ async function run():Promise<void>{
         try{
           const proposed=await brain.decide(s,recent,pendingViewerEvents);
           pendingViewerEvents.length=0;
-          const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can","eat_food"];
-          // Valid world action is not enough for money/inventory policy: the deterministic
-          // decision also enforces seed budgets and preservation of essential supplies.
-          if(!forageChosen && !economyTransaction.includes(d.action.type) &&
-              proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
-            d=proposed;
-          else if(proposed.speech) d={...d,speech:proposed.speech};
+          // Pi sets the daily strategy and narrates the action; the field planner
+          // and world executor own exact tiles, item IDs and route choices.
+          // An equally-typed model action may still target the wrong plot or warp.
+          if(proposed.speech)d={...d,speech:proposed.speech};
         }catch(error){console.warn("[brain] using safe plan:",error instanceof Error?error.message:String(error));}
       }
       // The model can take many seconds; never issue a decision based on a different
@@ -203,7 +228,7 @@ async function run():Promise<void>{
         await sleep(1300);continue;
       }
       action=d.action;
-      console.log("[bigfish]",JSON.stringify({day:s.day,location:s.location,goal:goal.goal,action,reason:d.reason}));
+      console.log("[bigfish]",JSON.stringify({day:s.day,time:s.time,energy:s.energy,location:s.location,goal:goal.goal,action,reason:d.reason}));
       await say(d.speech,action,goal.notes);
       if(action.type==="wait"){await sleep(action.seconds*1000);continue;}
       const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:action.type==="eat_food"||action.type==="pickup_drop"?25000:15000;
@@ -216,6 +241,7 @@ async function run():Promise<void>{
         try{
           await bridge.waitForNextState(before,6000,
             observed=>actionObserved(action!,s,observed));
+          stateConfirmed=true;
         }catch{
           unconfirmed={action,before:s,sequence:before,lastWarningAt:Date.now(),since:Date.now()};
           console.warn("[game] command acknowledged, but resulting state is not confirmed;",
@@ -248,6 +274,8 @@ async function run():Promise<void>{
         resourcePlanner.observe(s,action,result);
         foodPlanner.observe(s,action,result);
         dropPlanner.observe(s,action,result);
+        if(result.id!=="local-failure" && (!result.ok||stateConfirmed))
+          await memory.recordFarmResult(s,action,result);
       }
     }
   }

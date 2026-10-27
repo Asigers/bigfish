@@ -32,7 +32,7 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
   };
   const state:GameState={
     saveId:"demo-save",location:"Farm",day:1,season:"spring",time:610,energy:options.initialEnergy??200,x:4,y:4,paused:false,
-    crops:[{x:5,y:4,watered:false,ready:false}],emptyPlots:[{x:6,y:5,watered:false}],
+    crops:[{x:5,y:4,watered:false,ready:false,seedId:"(O)472"}],emptyPlots:[{x:6,y:5,watered:false}],
     tillable:[{x:6,y:6}],seeds:[{id:"(O)472",count:2}],forage:forageByRoom.Farm,exits:exits.Farm,
     worldLinks:allLinks,bed:null,inventoryFree:10,waterSources:[{x:4,y:6}],economy
   };
@@ -41,6 +41,12 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
   let busy=false,shippingIncome=0;
   function sync():void {
     state.seeds=economy.bag.filter(i=>i.category===-74).map(i=>({id:i.id,count:i.count}));
+    state.cropCatalog=[
+      {seedId:"(O)472",harvestId:"(O)24",seasons:["spring"],growthDays:4,
+        regrowDays:-1,sellPrice:35,minHarvest:1,raised:false,needsWatering:true},
+      {seedId:"(O)474",harvestId:"(O)188",seasons:["spring"],growthDays:13,
+        regrowDays:-1,sellPrice:75,minHarvest:1,raised:false,needsWatering:true}
+    ];
     state.food=economy.bag.filter(i=>["(O)16","(O)18"].includes(i.id))
       .map(i=>({id:i.id,count:i.count,restoreEnergy:i.id==="(O)16"?30:35}));
     state.inventoryFree=Math.max(0,10-economy.bag.length);
@@ -184,7 +190,7 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
         }
         else if(c.type==="plant_seed"&&plot&&remove(c.seedId,1)){
           state.emptyPlots=state.emptyPlots.filter(t=>t!==plot);
-          state.crops.push({x:c.x,y:c.y,watered:plot.watered,ready:false});
+          state.crops.push({x:c.x,y:c.y,watered:plot.watered,ready:false,seedId:c.seedId});
         }
         else if(c.type==="till_tile"&&economy.tools.equipped==="hoe"&&state.tillable.some(t=>t.x===c.x&&t.y===c.y)){
           state.tillable=state.tillable.filter(t=>t.x!==c.x||t.y!==c.y);
