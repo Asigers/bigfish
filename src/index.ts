@@ -142,6 +142,7 @@ async function run():Promise<void>{
     if(pendingViewerEvents.length>30)pendingViewerEvents.splice(0,pendingViewerEvents.length-30);
     let action:Action|undefined;
     let result:ActionResult|undefined;
+    let stateConfirmed=false;
     try {
       if(memory.needsPlanning(s)){
         let plan=memory.get()?.saveId===s.saveId?memory.get()!.strategy:DEFAULT_STRATEGY;
@@ -245,6 +246,7 @@ async function run():Promise<void>{
         try{
           await bridge.waitForNextState(before,6000,
             observed=>actionObserved(action!,s,observed));
+          stateConfirmed=true;
         }catch{
           unconfirmed={action,before:s,sequence:before,lastWarningAt:Date.now(),since:Date.now()};
           console.warn("[game] command acknowledged, but resulting state is not confirmed;",
@@ -277,7 +279,8 @@ async function run():Promise<void>{
         resourcePlanner.observe(s,action,result);
         foodPlanner.observe(s,action,result);
         dropPlanner.observe(s,action,result);
-        await memory.recordFarmResult(s,action,result);
+        if(result.id!=="local-failure" && (!result.ok||stateConfirmed))
+          await memory.recordFarmResult(s,action,result);
       }
     }
   }
