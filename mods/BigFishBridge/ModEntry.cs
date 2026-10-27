@@ -385,6 +385,35 @@ public sealed class ModEntry : Mod
             .Select(g => new { id = g.Key, count = g.Sum(o => o.Stack),
                 restoreEnergy = Math.Min(500, g.First().staminaRecoveredOnConsumption()) })
             .ToArray();
+        var chestKits = player.Items.Where(i => i?.QualifiedItemId == "(BC)130")
+            .Sum(i => i!.Stack);
+        var canCraftChest = player.craftingRecipes.ContainsKey("Chest") &&
+            CraftingRecipe.craftingRecipes.ContainsKey("Chest") &&
+            new CraftingRecipe("Chest", false).doesFarmerHaveIngredientsInInventory();
+        // Candidate cells are authoritative native placeability checks, not
+        // fabricated coordinates. Scan a small region on the game thread only.
+        var placementSites = new List<object>();
+        if (loc.Name == "Farm")
+        {
+            var binTile = loc is Farm farm ? farm.GetStarterShippingBinLocation() : Vector2.Zero;
+            var warpTiles = Exits(loc).Where(ValidNavigableExit).ToArray();
+            for (int radius = 1; radius <= 9 && placementSites.Count < 80; radius++)
+            for (int dx = -radius; dx <= radius && placementSites.Count < 80; dx++)
+            for (int dy = -radius; dy <= radius && placementSites.Count < 80; dy++)
+            {
+                if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != radius) continue;
+                var x = player.TilePoint.X + dx;
+                var y = player.TilePoint.Y + dy;
+                var tile = new Vector2(x, y);
+                if (x < 0 || y < 0 || x >= 150 || y >= 150 ||
+                    !loc.isTileOnMap(tile) || loc.objects.ContainsKey(tile) ||
+                    loc.terrainFeatures.ContainsKey(tile) ||
+                    Math.Abs(x - binTile.X) + Math.Abs(y - binTile.Y) <= 2 ||
+                    warpTiles.Any(w => Math.Abs(x - w.X) + Math.Abs(y - w.Y) <= 2) ||
+                    !loc.CanItemBePlacedHere(tile)) continue;
+                placementSites.Add(new { x, y });
+            }
+        }
         var bag = player.Items.Where(i => i != null && i.QualifiedItemId.StartsWith("(O)"))
             .GroupBy(i => i!.QualifiedItemId).Take(60)
             .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack),
@@ -442,7 +471,8 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, cropCatalog, food, forage, resources, drops, exits, worldLinks = links, waterSources,
+            crops, emptyPlots, tillable, seeds, chestKits, canCraftChest, placementSites,
+            cropCatalog, food, forage, resources, drops, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
@@ -612,6 +642,67 @@ public sealed class ModEntry : Mod
                 if (countAfter >= foodItemCountBefore || !player.isEating)
                 { Finish(cmd, false, "native eating did not consume one item"); return; }
                 active = cmd;
+                return;
+            }
+            if (cmd.Type == "craft_chest")
+            {
+                if (loc.Name != "Farm" || !player.craftingRecipes.ContainsKey("Chest") ||
+                    !CraftingRecipe.craftingRecipes.ContainsKey("Chest"))
+                { Finish(cmd, false, "chest recipe is not learned"); return; }
+                var recipe = new CraftingRecipe("Chest", false);
+                var crafted = recipe.createItem();
+                if (crafted.QualifiedItemId != "(BC)130" ||
+                    !recipe.doesFarmerHaveIngredientsInInventory() ||
+                    !player.couldInventoryAcceptThisItem(crafted))
+                { Finish(cmd, false, "chest ingredients, output or backpack unavailable"); return; }
+                var beforeWood = player.Items.Where(i => i?.QualifiedItemId == "(O)388")
+                    .Sum(i => i!.Stack);
+                var beforeChest = player.Items.Where(i => i?.QualifiedItemId == "(BC)130")
+                    .Sum(i => i!.Stack);
+                recipe.consumeIngredients(null);
+                var added = player.addItemToInventoryBool(crafted);
+                var afterWood = player.Items.Where(i => i?.QualifiedItemId == "(O)388")
+                    .Sum(i => i!.Stack);
+                var afterChest = player.Items.Where(i => i?.QualifiedItemId == "(BC)130")
+                    .Sum(i => i!.Stack);
+                var success = added && afterWood < beforeWood && afterChest > beforeChest;
+                if (success)
+                {
+                    player.craftingRecipes["Chest"] += recipe.numberProducedPerCraft;
+                    Game1.stats.checkForCraftingAchievements();
+                    loc.playSound("coin");
+                }
+                Finish(cmd, success, success ? "native chest recipe crafted" :
+                    "chest crafting did not reconcile inventory");
+                return;
+            }
+            if (cmd.Type == "place_chest")
+            {
+                if (loc.Name != "Farm" || cmd.X < 0 || cmd.Y < 0 ||
+                    cmd.X >= 150 || cmd.Y >= 150 ||
+                    !Near(player.TilePoint, cmd.X, cmd.Y))
+                { Finish(cmd, false, "chest placement requires nearby farm tile"); return; }
+                var pos = new Vector2(cmd.X, cmd.Y);
+                if (!loc.isTileOnMap(pos) || loc.objects.ContainsKey(pos) ||
+                    loc.terrainFeatures.ContainsKey(pos) || !loc.CanItemBePlacedHere(pos) ||
+                    Exits(loc).Where(ValidNavigableExit).Any(w =>
+                        Math.Abs(cmd.X - w.X) + Math.Abs(cmd.Y - w.Y) <= 2))
+                { Finish(cmd, false, "chest site no longer placeable"); return; }
+                var slot = player.Items.ToList().FindIndex(i =>
+                    i is Chest chest && chest.playerChest.Value &&
+                    chest.QualifiedItemId == "(BC)130");
+                if (slot < 0)
+                { Finish(cmd, false, "no crafted chest kit in backpack"); return; }
+                var kit = (Chest)player.Items[slot]!;
+                var placed = kit.placementAction(loc,cmd.X*64,cmd.Y*64,player);
+                var observed = loc.objects.TryGetValue(pos,out var installed) &&
+                    installed is Chest installedChest && installedChest.playerChest.Value;
+                if (placed && observed)
+                {
+                    player.Items[slot] = player.Items[slot]!.ConsumeStack(1);
+                    Finish(cmd, true, "native chest placement confirmed");
+                }
+                else Finish(cmd, false, "native chest placement failed");
                 return;
             }
             if (cmd.Type == "equip_tool")
