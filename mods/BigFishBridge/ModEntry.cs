@@ -343,7 +343,12 @@ public sealed class ModEntry : Mod
                     needsWatering = cropData.NeedsWatering
                 };
             })
-            .Where(c => c.harvestId.Length > 3 && c.growthDays > 0 && c.growthDays <= 100 &&
+            .Where(c => c.harvestId.Length > 3 && c.harvestId.Length <= 83 &&
+                c.harvestId.Skip(3).All(ch => char.IsLetterOrDigit(ch) || ch == '_' ||
+                    ch == '-' || ch == '.') &&
+                c.seasons.Length >= 1 && c.seasons.Length <= 4 &&
+                c.growthDays > 0 && c.growthDays <= 100 &&
+                c.sellPrice >= 0 && c.sellPrice <= 1000000 &&
                 c.minHarvest <= 100 && c.regrowDays >= -1 && c.regrowDays <= 60)
             .ToArray();
         var seeds = player.Items.Where(i => i != null && i.Category == -74 && i.QualifiedItemId.StartsWith("(O)"))
