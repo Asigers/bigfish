@@ -12,6 +12,7 @@ export type CropEstimate={
 };
 export type FarmPlan={
   saveId:string; dayKey:string; targetPlots:number; occupiedPlots:number; fieldTiles:Tile[];
+  protectedTiles:Tile[];
   preferredSeedId:string|null; crops:CropEstimate[];
   reason:string; revision:string; costKnown:boolean;
 };
@@ -76,7 +77,12 @@ export function buildFarmPlan(s:GameState,strategy:Strategy,
   const existing=[...s.crops,...s.emptyPlots].map(t=>({x:t.x,y:t.y}));
   const reserved=new Set(existing.map(key));
   const blocked=new Set([...(s.resources??[]),...(s.forage??[])].map(key));
-  const preserve=[s.economy.shippingBin,...s.exits].filter((t):t is Tile=>t!==null);
+  // Keep observable access tiles around warps, existing player chests and the
+  // shipping bin unplanted. Existing crops are grandfathered, never destroyed.
+  const preserve=[s.economy.shippingBin,...s.exits,...s.economy.chests]
+    .filter((t):t is Tile=>t!==null);
+  const protectedTiles=s.tillable.filter(t=>preserve.some(p=>distance(t,p)<=1))
+    .map(t=>({x:t.x,y:t.y})).slice(0,80);
   const priorSelection=new Set(prior?.saveId===s.saveId && prior.dayKey===s.season+":"+s.day?
     prior.fieldTiles.map(key):[]);
   const candidates=s.tillable.filter(t=>t.x<150&&t.y<150&&!reserved.has(key(t))&&
@@ -97,7 +103,8 @@ export function buildFarmPlan(s:GameState,strategy:Strategy,
   const estimates=rankedCrops(s);
   return {saveId:s.saveId,dayKey:s.season+":"+s.day,targetPlots:available.length,
     occupiedPlots:s.crops.length,
-    fieldTiles:available,preferredSeedId:chosenCrop(s,estimates),crops:estimates.slice(0,20),
+    fieldTiles:available,protectedTiles,
+    preferredSeedId:chosenCrop(s,estimates),crops:estimates.slice(0,20),
     reason:strategy.goal+" on "+available.length+" observed plots, "+daysLeft(s)+" season days remain",
     revision,costKnown:estimates.some(e=>e.observedSeedPrice!==null)};
 }
