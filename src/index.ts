@@ -18,6 +18,7 @@ import { buildFarmPlan } from "./farm-plan.ts";
 import {mergeFarmMap,routeCorridors} from "./farm-map.ts";
 import { updateWorkProject, nextWorkTask } from "./farm-work.ts";
 import {FarmHistory} from "./history.ts";
+import {cropInvestments,irrigationInvestment} from "./investment.ts";
 import {campaignNeedsRenewal,defaultCampaign,gameOrdinal,
   reconcileCampaign,nextCampaignTask,campaignComplete} from "./campaign.ts";
 import type { Action, ActionResult, Decision, GameState } from "./types.ts";
@@ -39,6 +40,7 @@ const sprinklerPlanner=new SprinklerPlanner();
 const memory=new GoalMemory();
 const history=new FarmHistory();
 let brainSessionSave:string|undefined;
+let lastInvestmentReport="";
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
 let nextDialogueAt=0;
@@ -235,12 +237,14 @@ async function run():Promise<void>{
       }
       const farmMap=memory.get()?.farmMap;
       if(s.location==="Farm" && campaignNeedsRenewal(s,memory.get()?.campaign)){
-        let campaignProposal=defaultCampaign(s);
+        const observed=history.metrics(s.saveId,gameOrdinal(s),14);
+        let campaignProposal=defaultCampaign(s,observed);
         if(brain){
           try{
             campaignProposal=await brain.proposeCampaign(s,[
-              "Last 14 days of observed work: "+JSON.stringify(
-                history.metrics(s.saveId,gameOrdinal(s),14)),
+              "Last 14 days of observed work: "+JSON.stringify(observed),
+              "Observed economic alternatives (unknown costs stay null): "+
+                JSON.stringify(cropInvestments(s,observed).slice(0,3)),
               ...(memory.get()?.farmOutcomes??[]).slice(-3)
                 .map(o=>"Prior farm day: "+JSON.stringify(o))
             ]);
@@ -310,6 +314,23 @@ async function run():Promise<void>{
             complete:campaignComplete(reconciled),
             tasks:reconciled.tasks.map(t=>({id:t.id,status:t.status,current:t.current,required:t.required}))
           }));
+      }
+      if(s.location==="Farm" && lastInvestmentReport!==s.saveId+":"+gameOrdinal(s)){
+        const measured=history.metrics(s.saveId,gameOrdinal(s),14);
+        const irrigationROI=irrigationInvestment(s,measured,field,
+          memory.get()?.sprinklerProject);
+        console.log("[farm-economy]",JSON.stringify({
+          daysObserved:measured.recordedDays,cashChange:measured.netGoldChange,
+          verifiedFailureRate:measured.observedFailureRate,
+          energyPerWater:measured.meanWaterEnergy,
+          cropAlternatives:cropInvestments(s,measured).slice(0,3).map(c=>({
+            seedId:c.seedId,seedCost:c.seedCost,estimatedMargin:c.margin,
+            waterEnergy:c.waterEnergy
+          })),
+          irrigationLaborSavings:irrigationROI?.estimatedEnergySavedPerDryDay??null,
+          irrigationGoldPayback:irrigationROI?.paybackDays??null
+        }));
+        lastInvestmentReport=s.saveId+":"+gameOrdinal(s);
       }
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
