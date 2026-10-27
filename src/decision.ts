@@ -77,8 +77,8 @@ export function parseDecision(raw:string):Decision {
     action={type:"equip_tool",tool:a.tool as "hoe"|"watering_can"|"axe"|"pickaxe"|"scythe"};
   else if(a.type==="craft_chest")action={type:"craft_chest"};
   else if(a.type==="place_chest"&&Number.isInteger(a.x)&&Number.isInteger(a.y)&&
-    a.x>=0&&a.y>=0&&a.x<150&&a.y<150)
-    action={type:"place_chest",x:a.x,y:a.y};
+    Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<150&&Number(a.y)<150)
+    action={type:"place_chest",x:Number(a.x),y:Number(a.y)};
   else if(a.type==="sleep")action={type:"sleep"};
   else throw Error("Unsupported action");
   return {action,speech:typeof d.speech==="string"?d.speech.slice(0,100):"",reason:typeof d.reason==="string"?d.reason.slice(0,120):""};
