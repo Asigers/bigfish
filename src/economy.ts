@@ -37,12 +37,16 @@ export function nextLocation(s:GameState,destination:string):string|undefined{
 export class EconomyPlanner {
   private failed=new Map<string,number>();
   private dayKey="";
+  private lastPosition="";
   private shopAttempted=false;
   private errand: "buy"|null=null;
   private cashAfterShipping=false;
   update(s:GameState,action?:Action,ok=true):void {
     const k=s.saveId+":"+s.season+":"+s.day;
+    const position=s.location+":"+s.x+":"+s.y;
     if(this.dayKey!==k){this.failed.clear();this.shopAttempted=false;this.errand=null;this.cashAfterShipping=false;this.dayKey=k;}
+    else if(this.lastPosition && this.lastPosition!==position)this.failed.clear();
+    this.lastPosition=position;
     if(action&&!ok)this.failed.set(s.location+":"+actionKey(action),(this.failed.get(s.location+":"+actionKey(action))??0)+1);
     if(action?.type==="buy_seed"&&ok)this.shopAttempted=true;
   }

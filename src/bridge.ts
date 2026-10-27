@@ -131,14 +131,15 @@ export class GameBridge {
   }
   getState():GameState|undefined{return Date.now()-this.stateAt<4000?this.state:undefined;}
   getStateSequence():number{return this.stateSequence;}
-  async waitForNextState(afterSequence:number,timeoutMs=5000):Promise<GameState>{
+  async waitForNextState(afterSequence:number,timeoutMs=5000,
+    matches:(state:GameState)=>boolean=()=>true):Promise<GameState>{
     const deadline=Date.now()+timeoutMs;
     while(Date.now()<deadline){
       const state=this.getState();
-      if(state && this.stateSequence>afterSequence)return state;
+      if(state && this.stateSequence>afterSequence && matches(state))return state;
       await new Promise<void>(resolve=>setTimeout(resolve,50));
     }
-    throw Error("No fresh game state after command completion");
+    throw Error("No confirmed game state after command completion");
   }
   drainEvents():ViewerEvent[]{return this.events.splice(0);}
   send(action:Exclude<Action,{type:"wait"}>,timeoutMs=15000):Promise<ActionResult>{

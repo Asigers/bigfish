@@ -42,7 +42,7 @@ const coordinate = (v: unknown): v is Tile => {
 };
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const locName = (v:unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 80 && /^[A-Za-z0-9_-]+$/.test(v);
-const validExit = (v:unknown): v is Exit => record(v) && coordinate(v) && locName(v.target);
+const validExit = (v:unknown): v is Exit => record(v) && coordinate(v) && locName((v as Exit).target);
 
 // Ignore malformed map warps while keeping all other state fields strictly validated.
 // Some Stardew locations expose off-map/placeholder warps that cannot be navigated to.
@@ -84,17 +84,17 @@ export function stateValidationIssues(input: unknown): string[] {
   for (const k of numberFields) if (!Number.isFinite(s[k])) issues.push(k);
   if (!coordinate({x: s.x, y: s.y})) issues.push("player coordinates");
   if (typeof s.day !== "number" || s.day <= 0 || s.day > 28) issues.push("day range");
-  const checkArray = (key: string, max: number, validate: (v: any) => boolean) => {
+  const checkArray = (key: string, max: number, validate: (v: unknown) => boolean) => {
     const values = s[key];
     if (!Array.isArray(values) || values.length > max) { issues.push(key + " array/length"); return; }
     const index = values.findIndex(v => !validate(v));
     if (index >= 0) issues.push(key + "[" + index + "]");
   };
-  checkArray("crops", 250, v => coordinate(v) && typeof v.watered === "boolean" && typeof v.ready === "boolean");
-  checkArray("emptyPlots", 250, v => coordinate(v) && typeof v.watered === "boolean");
+  checkArray("crops", 250, v => coordinate(v) && typeof (v as CropTile).watered === "boolean" && typeof (v as CropTile).ready === "boolean");
+  checkArray("emptyPlots", 250, v => coordinate(v) && typeof (v as PlotTile).watered === "boolean");
   checkArray("tillable", 250, coordinate);
   checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
-    /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && v.count > 0);
+    /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && Number(v.count) > 0);
   checkArray("exits", 50, validExit);
   checkArray("worldLinks", 300, v => record(v) && locName(v.from) && locName(v.to));
   if (s.bed !== null && !coordinate(s.bed)) issues.push("bed");

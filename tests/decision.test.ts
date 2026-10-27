@@ -52,3 +52,16 @@ test("accept supported structured actions",()=>{
   assert.deepEqual(parseDecision('{"action":{"type":"sleep"},"speech":"睡觉","reason":"late"}').action,{type:"sleep"});
   assert.deepEqual(parseDecision('{"action":{"type":"travel_to","target":"FarmHouse"}}').action,{type:"travel_to",target:"FarmHouse"});
 });
+
+
+test("manual movement unlocks same-day route retry after two failures",()=>{
+  const p=new Autopilot();
+  const home={...base,location:"FarmHouse",bed:{x:5,y:5},time:610,
+    exits:[{x:3,y:11,target:"Farm"}],x:4,y:5};
+  const commute={type:"travel_to" as const,target:"Farm"};
+  assert.deepEqual(p.decide(home).action,commute);
+  p.observe(home,[{id:"fail1",ok:false,message:"path blocked"}],commute);
+  p.observe(home,[{id:"fail2",ok:false,message:"path blocked"}],commute);
+  assert.deepEqual(p.decide(home).action,{type:"wait",seconds:5});
+  assert.deepEqual(p.decide({...home,x:5}).action,commute);
+});
