@@ -10,9 +10,13 @@ import { allowedAsset, resolvedAsset, assetContentType, hasInstalledModel } from
 type Pending={cmd:Command;before:GameState;resolve:(r:ActionResult)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout;startedAt:number};
 type Uncertain={cmd:Command;before:GameState;startedAt:number;lateResult?:ActionResult};
 export class CommandOutcomeUnknownError extends Error {
-  constructor(readonly commandId:string,readonly commandType:Command["type"]){
+  readonly commandId:string;
+  readonly commandType:Command["type"];
+  constructor(commandId:string,commandType:Command["type"]){
     super("Command outcome unknown: "+commandType+" ("+commandId+"); waiting for reconciliation");
     this.name="CommandOutcomeUnknownError";
+    this.commandId=commandId;
+    this.commandType=commandType;
   }
 }
 export class GameBridge {
