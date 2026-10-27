@@ -1,4 +1,4 @@
-import type { ActionResult, Command, GameState, BagItem, Tile, EconomyState } from "./types.ts";
+import type { ActionResult, Command, GameState, BagItem, Tile, EconomyState, ResourceNode } from "./types.ts";
 type Room="Farm"|"FarmHouse"|"BusStop"|"Town"|"SeedShop";
 const exits:Record<Room,{x:number;y:number;target:Room}[]>={
   Farm:[{x:6,y:2,target:"FarmHouse"},{x:8,y:6,target:"BusStop"}],
@@ -15,9 +15,13 @@ export function startSimulator(port:number,token:string):()=>void{
     chests:[{x:6,y:3,items:[] as BagItem[]}],
     shippingBin:{x:7,y:4} as Tile|null,
     shop:null as EconomyState["shop"],
-    tools:{hoe:true,wateringCan:true,equipped:"hoe",waterLeft:40}
+    tools:{hoe:true,wateringCan:true,axe:true,pickaxe:true,scythe:true,equipped:"hoe",waterLeft:40}
   };
   const savedChests=economy.chests;
+  const farmResources:ResourceNode[]=[
+    {x:7,y:7,kind:"twig",health:1},{x:8,y:7,kind:"stone",health:2},
+    {x:9,y:8,kind:"weed",health:1},{x:10,y:9,kind:"tree",health:3}
+  ];
   const forageByRoom:Record<Room,{x:number;y:number;itemId:string}[]>={
     Farm:[{x:3,y:5,itemId:"(O)16"}],
     FarmHouse:[],
@@ -40,6 +44,7 @@ export function startSimulator(port:number,token:string):()=>void{
     const room=state.location as Room;
     state.exits=exits[room]??[];
     state.forage=forageByRoom[room]??[];
+    state.resources=room==="Farm"?farmResources:[];
     state.bed=room==="FarmHouse"?{x:5,y:5}:null;
     economy.shippingBin=room==="Farm"?{x:7,y:4}:null;
     economy.chests=room==="Farm"?savedChests:[];
@@ -92,8 +97,28 @@ export function startSimulator(port:number,token:string):()=>void{
           add(found.itemId,1,-79,true);
         }
       }
+      else if(c.type==="clear_resource"){
+        const index=farmResources.findIndex(n=>n.x===c.x&&n.y===c.y&&n.kind===c.kind);
+        const tool=c.kind==="stone"?"pickaxe":c.kind==="weed"?"scythe":"axe";
+        const near=Math.max(Math.abs(state.x-c.x),Math.abs(state.y-c.y))<=1;
+        if(state.location!=="Farm" || state.energy<45 || index<0 || !near ||
+          economy.tools.equipped!==tool)ok=false;
+        else{
+          farmResources[index].health--;
+          state.energy-=2;
+          if(farmResources[index].health<=0){
+            farmResources.splice(index,1);
+            add(c.kind==="stone"?"(O)390":c.kind==="weed"?"(O)771":"(O)388",
+              1,c.kind==="stone"?-300:0,false);
+          }
+        }
+      }
       else if(c.type==="equip_tool"){
-        if(c.tool==="hoe"&&!economy.tools.hoe||c.tool==="watering_can"&&!economy.tools.wateringCan)ok=false;
+        if((c.tool==="hoe"&&!economy.tools.hoe)||
+          (c.tool==="watering_can"&&!economy.tools.wateringCan)||
+          (c.tool==="axe"&&!economy.tools.axe)||
+          (c.tool==="pickaxe"&&!economy.tools.pickaxe)||
+          (c.tool==="scythe"&&!economy.tools.scythe))ok=false;
         else economy.tools.equipped=c.tool;
       }
       else if(c.type==="buy_seed"){
