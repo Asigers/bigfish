@@ -123,6 +123,27 @@ export class SprinklerPlanner{
       !project||project.saveId!==s.saveId||!s.sprinklerSites||!s.sprinklerRecipes||
       !s.installedSprinklers||!s.economy)return;
     if(project.status==="installed"||project.status==="watering_verified")return;
+    if(project.status==="materials_needed"){
+      const learned=s.sprinklerRecipes.find(r=>r.kind===project.kind)?.learned;
+      if(!learned || s.inventoryFree<=0)return;
+      for(const ingredient of project.ingredients){
+        const owned=s.economy.bag.filter(i=>i.id===ingredient.id)
+          .reduce((n,i)=>n+i.count,0);
+        if(owned>=ingredient.count)continue;
+        for(const chest of s.economy.chests){
+          const qty=chest.items.filter(i=>i.id===ingredient.id).reduce((n,i)=>n+i.count,0);
+          if(qty<=0)continue;
+          const needed=Math.min(ingredient.count-owned,qty);
+          const a:Action=near(s,chest)?
+            {type:"withdraw_item",x:chest.x,y:chest.y,itemId:ingredient.id,count:needed}:
+            {type:"move_to",x:chest.x,y:chest.y};
+          if(this.allowed(s,a))
+            return {action:a,reason:"Fetch real crafting materials from existing farm storage",
+              speech:"材料在箱子里，先拿出来再制作洒水器。"};
+        }
+      }
+      return;
+    }
     if(project.status==="ready_to_craft"){
       const recipe=s.sprinklerRecipes.find(r=>r.kind===project.kind);
       if(recipe?.learned&&recipe.canCraft&&s.inventoryFree>0){
