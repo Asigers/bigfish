@@ -70,7 +70,7 @@ test("7 simulated Stardew days retain one multi-day campaign, save separate evid
       });
       const resumed=new GoalMemory(file);await resumed.load();
       await resumed.startDay(next,DEFAULT_STRATEGY);
-      assert.equal(resumed.get()?.campaign?.startedOrdinal,begin);
+      assert.equal(resumed.get()?.campaign?.startedOrdinal,goal.startedOrdinal);
       await memory.startDay(next,DEFAULT_STRATEGY);
       if(gameDay<7){
         current=await send({type:"travel_to",target:"Farm"},s=>s.location==="Farm");
