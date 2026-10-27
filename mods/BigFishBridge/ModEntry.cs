@@ -494,7 +494,7 @@ public sealed class ModEntry : Mod
             economy,
             saveId = Game1.uniqueIDForThisGame.ToString(),
             location = loc.Name,
-            day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
+            year = Game1.year, day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
             crops, emptyPlots, tillable, surveyTiles, seeds, chestKits, canCraftChest, placementSites,
