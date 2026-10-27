@@ -18,10 +18,17 @@ export function startSimulator(port:number,token:string):()=>void{
     tools:{hoe:true,wateringCan:true,equipped:"hoe",waterLeft:40}
   };
   const savedChests=economy.chests;
+  const forageByRoom:Record<Room,{x:number;y:number;itemId:string}[]>={
+    Farm:[{x:3,y:5,itemId:"(O)16"}],
+    FarmHouse:[],
+    BusStop:[{x:5,y:4,itemId:"(O)18"}],
+    Town:[],
+    SeedShop:[]
+  };
   const state:GameState={
     saveId:"demo-save",location:"Farm",day:1,season:"spring",time:610,energy:200,x:4,y:4,paused:false,
     crops:[{x:5,y:4,watered:false,ready:false}],emptyPlots:[{x:6,y:5,watered:false}],
-    tillable:[{x:6,y:6}],seeds:[{id:"(O)472",count:2}],exits:exits.Farm,
+    tillable:[{x:6,y:6}],seeds:[{id:"(O)472",count:2}],forage:forageByRoom.Farm,exits:exits.Farm,
     worldLinks:allLinks,bed:null,inventoryFree:10,waterSources:[{x:4,y:6}],economy
   };
   const seen=new Set<string>();
@@ -32,6 +39,7 @@ export function startSimulator(port:number,token:string):()=>void{
     state.inventoryFree=Math.max(0,10-economy.bag.length);
     const room=state.location as Room;
     state.exits=exits[room]??[];
+    state.forage=forageByRoom[room]??[];
     state.bed=room==="FarmHouse"?{x:5,y:5}:null;
     economy.shippingBin=room==="Farm"?{x:7,y:4}:null;
     economy.chests=room==="Farm"?savedChests:[];
@@ -72,6 +80,16 @@ export function startSimulator(port:number,token:string):()=>void{
           economy.gold+=shippingIncome;shippingIncome=0;
           state.crops=state.crops.map(c=>({...c,watered:false,ready:true}));
           economy.tools.waterLeft=40;
+        }
+      }
+      else if(c.type==="collect_forage"){
+        const patches=forageByRoom[state.location as Room]??[];
+        const found=patches.find(f=>f.x===c.x&&f.y===c.y);
+        const near=Math.max(Math.abs(state.x-c.x),Math.abs(state.y-c.y))<=1;
+        if(!found || !near || state.inventoryFree<=0)ok=false;
+        else{
+          patches.splice(patches.indexOf(found),1);
+          add(found.itemId,1,-79,true);
         }
       }
       else if(c.type==="equip_tool"){
