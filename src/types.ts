@@ -19,6 +19,7 @@ export type CropInfo = { seedId:string; harvestId:string; seasons:string[];
 export type LooseDrop = Tile & { itemId:string };
 export type ResourceKind = "tree" | "stone" | "twig" | "weed";
 export type ResourceNode = Tile & { kind:ResourceKind; health:number };
+export type SurveyTile = Tile & { walkable:boolean; soil:boolean; occupied:boolean };
 export type Exit = Tile & { target: string };
 export type WorldLink = { from: string; to: string };
 export type GameState = {
@@ -26,7 +27,7 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; surveyTiles?:SurveyTile[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -95,6 +96,10 @@ export function validState(input: unknown): input is GameState {
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
+    && (s.surveyTiles===undefined || (Array.isArray(s.surveyTiles) &&
+      s.surveyTiles.length<=225 && s.surveyTiles.every(t=>coordinate(t)&&
+        typeof t.walkable==="boolean"&&typeof t.soil==="boolean"&&
+        typeof t.occupied==="boolean")))
     && (s.chestKits===undefined || (Number.isInteger(s.chestKits)&&s.chestKits>=0&&s.chestKits<=9999))
     && (s.canCraftChest===undefined || typeof s.canCraftChest==="boolean")
     && (s.placementSites===undefined || (Array.isArray(s.placementSites) &&
@@ -146,6 +151,10 @@ export function stateValidationIssues(input: unknown): string[] {
       (typeof (v as CropTile).seedId==="string" &&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as CropTile).seedId!))));
   if(s.cropCatalog!==undefined)checkArray("cropCatalog",150,validCropInfo);
+  if(s.surveyTiles!==undefined)checkArray("surveyTiles",225,v=>
+    coordinate(v)&&typeof (v as SurveyTile).walkable==="boolean"&&
+    typeof (v as SurveyTile).soil==="boolean"&&
+    typeof (v as SurveyTile).occupied==="boolean");
   if(s.chestKits!==undefined && (!Number.isInteger(s.chestKits)||Number(s.chestKits)<0||Number(s.chestKits)>9999))issues.push("chestKits");
   if(s.canCraftChest!==undefined && typeof s.canCraftChest!=="boolean")issues.push("canCraftChest");
   if(s.placementSites!==undefined)checkArray("placementSites",80,coordinate);
