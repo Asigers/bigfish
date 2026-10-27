@@ -13,6 +13,7 @@ import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
 import { actionObserved } from "./action-confirmation.ts";
 import { buildFarmPlan } from "./farm-plan.ts";
+import { updateWorkProject, nextWorkTask } from "./farm-work.ts";
 import type { Action, ActionResult, Decision, GameState } from "./types.ts";
 
 const demo=process.argv.includes("--demo");
@@ -162,6 +163,23 @@ async function run():Promise<void>{
         await say("新的一天，本鲸的目标是："+plan.notes,{type:"wait",seconds:1},plan.goal);
       }
       const goal=memory.get()?.strategy??DEFAULT_STRATEGY;
+      if(s.location==="Farm"&&s.economy){
+        const former=memory.get()?.workProject;
+        const project=updateWorkProject(s,former);
+        if(project){
+          await memory.setWorkProject(s,project);
+          if(!former || former.evaluatedOn!==project.evaluatedOn ||
+            JSON.stringify(former.tasks)!==JSON.stringify(project.tasks)){
+            console.log("[farm-work]",JSON.stringify({
+              objective:project.objective,day:project.evaluatedOn,
+              cashReserve:project.cashReserve,materials:project.materialTargets,
+              nextTask:nextWorkTask(project)?.id??"awaiting supported skills",
+              tasks:project.tasks.map(t=>({id:t.id,status:t.status,progress:t.progress,required:t.required}))
+            }));
+          }
+        }
+      }
+      const project=memory.get()?.workProject;
       if(s.location==="Farm" && s.cropCatalog?.length &&
         (!memory.get()?.farmPlan ||
           memory.get()?.farmPlan?.dayKey!==s.season+":"+s.day)){
@@ -180,7 +198,7 @@ async function run():Promise<void>{
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
       const foodNeed=foodPlanner.propose(s);
-      const economic=foodNeed?undefined:economy.propose(s,goal,field);
+      const economic=foodNeed?undefined:economy.propose(s,goal,field,project);
       let d:Decision=foodNeed??economic??planner.decide(s,field);
       let forageChosen=Boolean(foodNeed);
       // Productive gathering begins only after farming and financial errands have
@@ -194,7 +212,7 @@ async function run():Promise<void>{
       if(dropDecision){d=dropDecision;forageChosen=true;}
       // Work on immediate, measured materials before setting out for longer foraging.
       const resourceDecision=canBeginForage && !forager.isActive && !dropDecision ?
-        resourcePlanner.propose(s,true) : undefined;
+        resourcePlanner.propose(s,true,project) : undefined;
       if(resourceDecision){d=resourceDecision;forageChosen=true;}
       if(!economic && !dropDecision && !resourceDecision && (forager.isActive || canBeginForage)){
         const forageDecision=forager.propose(s,canBeginForage);
