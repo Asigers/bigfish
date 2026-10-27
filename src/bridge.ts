@@ -1,12 +1,14 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { AvatarEvent } from "./avatar.ts";
 import type { Action, ActionResult, Command, GameState, ViewerEvent } from "./types.ts";
 import { validState, stateValidationIssues, sanitizeStateExits } from "./types.ts";
 import { allowedAsset, resolvedAsset, assetContentType, hasInstalledModel } from "./overlay-assets.ts";
-type Pending={cmd:Command;resolve:(r:ActionResult)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout;startedAt:number};
-type Uncertain={cmd:Command;startedAt:number;lateResult?:ActionResult};
+type Pending={cmd:Command;before:GameState;resolve:(r:ActionResult)=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout;startedAt:number};
+type Uncertain={cmd:Command;before:GameState;startedAt:number;lateResult?:ActionResult};
 export class CommandOutcomeUnknownError extends Error {
   constructor(readonly commandId:string,readonly commandType:Command["type"]){
     super("Command outcome unknown: "+commandType+" ("+commandId+"); waiting for reconciliation");
@@ -27,10 +29,57 @@ export class GameBridge {
   readonly token:string;
   readonly port:number;
   readonly host:string;
-  constructor(token:string,port=45931,host="127.0.0.1"){
-    this.token=token;this.port=port;this.host=host;
+  readonly journalPath?:string;
+  constructor(token:string,port=45931,host="127.0.0.1",journalPath?:string){
+    this.token=token;this.port=port;this.host=host;this.journalPath=journalPath;
     if(token.length<16||token==="replace-with-a-random-secret")throw Error("Set random BIGFISH_TOKEN >=16 chars");
     if(host!=="127.0.0.1")throw Error("Bridge must use loopback");
+  }
+  private persistJournal():void{
+    if(!this.journalPath)return;
+    const outstanding=this.uncertain??this.pending;
+    const record={version:1,unresolved:outstanding?{
+      cmd:outstanding.cmd,before:outstanding.before,
+      startedAt:outstanding.startedAt,
+      lateResult:this.uncertain?.lateResult??null
+    }:null,recentResults:[...this.recentResults.values()]};
+    mkdirSync(dirname(this.journalPath),{recursive:true});
+    const staging=this.journalPath+".tmp";
+    writeFileSync(staging,JSON.stringify(record),{encoding:"utf8",mode:0o600});
+    renameSync(staging,this.journalPath);
+  }
+  private restoreJournal():void{
+    if(!this.journalPath)return;
+    let doc:unknown;
+    try{doc=JSON.parse(readFileSync(this.journalPath,"utf8"));}
+    catch(error){
+      if((error as NodeJS.ErrnoException).code==="ENOENT")return;
+      throw Error("Cannot read command journal; refusing unsafe restart", {cause:error});
+    }
+    if(!doc||typeof doc!=="object")throw Error("Invalid command journal");
+    const stored=doc as Record<string,unknown>;
+    if(stored.version!==1 || !Array.isArray(stored.recentResults))
+      throw Error("Unsupported/corrupted command journal; refusing unsafe restart");
+    for(const item of stored.recentResults.slice(-128)){
+      if(!item||typeof item!=="object")continue;
+      const r=item as Partial<ActionResult>;
+      if(typeof r.id==="string" && typeof r.ok==="boolean" && typeof r.message==="string")
+        this.recentResults.set(r.id,{id:r.id,ok:r.ok,message:r.message});
+    }
+    if(stored.unresolved!==null && stored.unresolved!==undefined){
+      const entry=stored.unresolved as Partial<Uncertain>;
+      if(!entry||typeof entry!=="object"||
+        !entry.cmd||typeof entry.cmd.id!=="string"||
+        typeof entry.cmd.type!=="string"||
+        !validState(entry.before)||typeof entry.startedAt!=="number")
+        throw Error("Corrupted unresolved command; refusing unsafe restart");
+      this.uncertain={cmd:entry.cmd,before:entry.before,
+        startedAt:entry.startedAt,
+        ...(entry.lateResult&&typeof entry.lateResult.id==="string"?
+          {lateResult:entry.lateResult}:{})};
+      console.warn("[bridge] restored unresolved game command",entry.cmd.type,
+        "id="+entry.cmd.id,"; will reconcile before doing anything else");
+    }
   }
   private authorized(req:IncomingMessage):boolean{
     const supplied=req.headers["x-bigfish-token"];
@@ -58,6 +107,7 @@ export class GameBridge {
     }
   }
   async start():Promise<void>{
+    this.restoreJournal();
     const html=await readFile(new URL("../overlay/index.html",import.meta.url),"utf8");
     const live2d=await readFile(new URL("../overlay/live2d.js",import.meta.url),"utf8");
     this.server=createServer(async(req,res)=>{
@@ -166,6 +216,7 @@ export class GameBridge {
       const oldest=this.recentResults.keys().next().value;
       if(oldest!==undefined)this.recentResults.delete(oldest);
     }
+    this.persistJournal();
   }
   getUncertain():Readonly<Uncertain>|undefined{return this.uncertain;}
   settleUncertain(id:string,reason:"observed"|"failed-result"):void{
@@ -174,6 +225,7 @@ export class GameBridge {
     if(reason==="failed-result"&&u.lateResult?.ok!==false)
       throw Error("Cannot settle without an authoritative failed result");
     this.uncertain=undefined;
+    this.persistJournal();
     console.log("[bridge] settled uncertain command",u.cmd.type,reason);
   }
   listeningPort():number{
@@ -204,16 +256,23 @@ export class GameBridge {
       const timer=setTimeout(()=>{
         if(this.pending?.cmd.id===cmd.id){
           this.pending=undefined;
-          this.uncertain={cmd,startedAt:Date.now()};
+          this.uncertain={cmd,before:s,startedAt:Date.now()};
+          this.persistJournal();
           reject(new CommandOutcomeUnknownError(cmd.id,cmd.type));
         }
       },timeoutMs);
-      this.pending={cmd,resolve,reject,timer,startedAt:Date.now()};
+      this.pending={cmd,before:s,resolve,reject,timer,startedAt:Date.now()};
+      this.persistJournal();
     });
   }
   async stop():Promise<void>{
     const p=this.pending;this.pending=undefined;
-    if(p){clearTimeout(p.timer);p.reject(Error("Bridge stopped"));}
+    if(p){
+      clearTimeout(p.timer);
+      this.uncertain={cmd:p.cmd,before:p.before,startedAt:p.startedAt};
+      this.persistJournal();
+      p.reject(Error("Bridge stopped"));
+    }
     for(const watcher of this.watchers)watcher.end();
     this.watchers.clear();
     if(this.server)await new Promise<void>(resolve=>this.server!.close(()=>resolve()));
