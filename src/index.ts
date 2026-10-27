@@ -14,6 +14,7 @@ import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
 import { actionObserved } from "./action-confirmation.ts";
 import { buildFarmPlan } from "./farm-plan.ts";
+import {mergeFarmMap,routeCorridors} from "./farm-map.ts";
 import { updateWorkProject, nextWorkTask } from "./farm-work.ts";
 import type { Action, ActionResult, Decision, GameState } from "./types.ts";
 
@@ -192,16 +193,36 @@ async function run():Promise<void>{
         }
       }
       const project=memory.get()?.workProject;
+      // Merge only authoritative patches, scoped to the active save. Unobserved
+      // cells are never filled with assumptions or reusable foreign-save terrain.
+      if(s.location==="Farm" && s.surveyTiles?.length){
+        const previous=memory.get()?.farmMap;
+        const surveyed=mergeFarmMap(s,previous);
+        if(surveyed){
+          await memory.setFarmMap(s,surveyed);
+          if(!previous||surveyed.tiles.length>=previous.tiles.length+40)
+            console.log("[farm-map]",JSON.stringify({
+              observedTiles:surveyed.tiles.length,
+              currentPatch:s.surveyTiles.length,
+              verifiedRouteTiles:routeCorridors(s,surveyed).length
+            }));
+        }
+      }
+      const farmMap=memory.get()?.farmMap;
       if(s.location==="Farm" && s.cropCatalog?.length &&
         (!memory.get()?.farmPlan ||
           memory.get()?.farmPlan?.dayKey!==s.season+":"+s.day)){
         const oldOutcomes=memory.get()?.farmOutcomes??[];
-        const built=buildFarmPlan(s,goal,oldOutcomes.at(-1));
+        const built=buildFarmPlan(s,goal,oldOutcomes.at(-1),undefined,farmMap);
         if(built){
           await memory.setFarmPlan(s,built);
           console.log("[farm-plan]",JSON.stringify({
             day:built.dayKey,targetPlots:built.targetPlots,preferredSeedId:built.preferredSeedId,
-            topCrops:built.crops.slice(0,3),revision:built.revision
+            topCrops:built.crops.slice(0,3),revision:built.revision,
+            protectedTiles:built.protectedTiles.length,
+            sprinklerIdeas:built.sprinklerIdeas?.slice(0,3).map(i=>({
+              kind:i.kind,x:i.x,y:i.y,coveredPlots:i.coveredPlots
+            }))??[]
           }));
         }
       }
