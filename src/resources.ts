@@ -70,7 +70,11 @@ export class FarmResourcePlanner {
       s.time>=1800||s.energy<65||s.inventoryFree<=0||!s.economy||
       !s.resources||this.strikes>=this.maxDailyStrikes)return;
     const bag=s.economy.bag;
-    const count=(id:string)=>bag.filter(i=>i.id===id).reduce((n,i)=>n+i.count,0);
+    // Stored stock belongs to the farm as much as backpack stock does.
+    // Otherwise, putting 50 wood in a chest makes the agent farm 50 more every day.
+    const count=(id:string)=>bag.filter(i=>i.id===id).reduce((n,i)=>n+i.count,0) +
+      s.economy!.chests.reduce((n,chest)=>n+
+        chest.items.filter(i=>i.id===id).reduce((k,i)=>k+i.count,0),0);
     const missing=(kind:ResourceKind)=>count(resourceItem[kind])<goalCount[kind];
     const available=(kind:ResourceKind)=>{
       const tool=resourceTool[kind];
