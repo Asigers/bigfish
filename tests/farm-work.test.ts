@@ -28,7 +28,8 @@ const base:GameState={
       equipped:"hoe",waterLeft:40}}
 };
 test("construction dependency is explicit and never falsely marked complete",()=>{
-  const project=updateWorkProject(base)!;
+  const withoutChest={...base,economy:{...base.economy!,chests:[]}};
+  const project=updateWorkProject(withoutChest)!;
   assert.ok(validWorkProject(project));
   assert.equal(project.cashReserve,100);
   assert.deepEqual(project.materialTargets,{"(O)388":50,"(O)390":30,"(O)771":15});
@@ -36,6 +37,7 @@ test("construction dependency is explicit and never falsely marked complete",()=
   assert.equal(nextWorkTask(project)?.id,"wood");
   const crafting=project.tasks.find(t=>t.id==="craft_chest")!;
   assert.equal(crafting.status,"blocked");
+  assert.equal(project.tasks.find(t=>t.id==="place_chest")?.status,"blocked");
   assert.deepEqual(crafting.dependsOn,["wood"]);
   const withWood={...base,economy:{...base.economy!,chests:[{
     x:8,y:7,items:[{id:"(O)388",count:50,category:-16,sellable:false}]
@@ -43,7 +45,8 @@ test("construction dependency is explicit and never falsely marked complete",()=
   const done=updateWorkProject(withWood,project)!;
   assert.equal(stock(withWood,"(O)388"),50);
   assert.equal(done.tasks.find(t=>t.id==="wood")?.status,"done");
-  assert.equal(done.tasks.find(t=>t.id==="craft_chest")?.status,"blocked");
+  assert.equal(done.tasks.find(t=>t.id==="craft_chest")?.status,"done");
+  assert.equal(done.tasks.find(t=>t.id==="place_chest")?.status,"done");
   assert.equal(nextWorkTask(done)?.id,"stone");
 });
 test("do not lose farm material progress after travelling to a shop",()=>{
@@ -54,8 +57,8 @@ test("do not lose farm material progress after travelling to a shop",()=>{
   assert.equal(updateWorkProject({...shop,saveId:"another-save"},first),undefined);
   assert.equal(validWorkProject({...first,tasks:[...first.tasks,first.tasks[0]]}),false);
   assert.equal(validWorkProject({...first,materialTargets:{"(O)388":-1,"(O)390":30,"(O)771":15}}),false);
-  assert.equal(validWorkProject({...first,tasks:first.tasks.map(t=>t.id==="craft_chest"?
-    {...t,status:"done" as const}:t)}),false);
+  assert.equal(validWorkProject({...first,tasks:first.tasks.map(t=>t.id==="place_chest"?
+    {...t,dependsOn:["stone"]}:t)}),false);
 });
 test("cash reserve is enforced at the shop, not just in the farm plan narrative",()=>{
   const project=updateWorkProject(base)!;
