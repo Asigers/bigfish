@@ -13,6 +13,11 @@ export function actionObserved(action:Action,before:GameState,after:GameState):b
       return before.location===after.location && beforeNode!==undefined &&
         after.resources!==undefined && (afterNode===undefined || afterNode.health<beforeNode.health);
     }
+    case "pickup_drop":return before.location===after.location &&
+      before.drops?.some(d=>d.itemId===action.itemId&&
+        Math.abs(d.x-action.x)<=2&&Math.abs(d.y-action.y)<=2)===true &&
+      stackCount(after.economy?.bag,action.itemId)>
+        stackCount(before.economy?.bag,action.itemId);
     case "collect_forage":{
       const item=before.forage?.find(f=>f.x===action.x&&f.y===action.y);
       return after.location===before.location && item!==undefined &&

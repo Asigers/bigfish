@@ -63,6 +63,10 @@ export function parseDecision(raw:string):Decision {
     action={type:"buy_seed",itemId:a.itemId,count:Number(a.count)};
   else if(["store_item","withdraw_item"].includes(String(a.type))&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId)&&Number.isInteger(a.count)&&Number(a.count)>0&&Number(a.count)<=9999&&Number.isInteger(a.x)&&Number.isInteger(a.y))
     action={type:a.type as "store_item"|"withdraw_item",itemId:a.itemId,count:Number(a.count),x:Number(a.x),y:Number(a.y)};
+  else if(a.type==="pickup_drop"&&Number.isInteger(a.x)&&Number.isInteger(a.y)&&
+    Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<150&&Number(a.y)<150&&
+    typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId))
+    action={type:"pickup_drop",x:Number(a.x),y:Number(a.y),itemId:a.itemId};
   else if(a.type==="clear_resource"&&Number.isInteger(a.x)&&Number.isInteger(a.y)&&
     Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<150&&Number(a.y)<150 &&
     ["tree","stone","twig","weed"].includes(String(a.kind)))
@@ -188,6 +192,9 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   }
   if(a.type==="collect_forage")return s.inventoryFree>0 && close(here,a) &&
     Boolean(s.forage?.some(item=>item.x===a.x&&item.y===a.y));
+  if(a.type==="pickup_drop")return s.inventoryFree>0&&
+    Boolean(s.drops?.some(d=>d.itemId===a.itemId&&
+      Math.abs(d.x-a.x)<=2&&Math.abs(d.y-a.y)<=2));
   if(a.type==="clear_resource")return s.location==="Farm" && s.energy>=65 &&
     s.inventoryFree>0 && close(here,a) &&
     Boolean(s.resources?.some(n=>n.x===a.x&&n.y===a.y&&n.kind===a.kind));

@@ -7,6 +7,7 @@ import { EconomyPlanner, DEFAULT_STRATEGY } from "./economy.ts";
 import { ForagePlanner } from "./forage.ts";
 import { FarmResourcePlanner } from "./resources.ts";
 import { FoodPlanner } from "./food.ts";
+import { DropPlanner } from "./drops.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
@@ -24,6 +25,7 @@ const economy=new EconomyPlanner();
 const forager=new ForagePlanner();
 const resourcePlanner=new FarmResourcePlanner();
 const foodPlanner=new FoodPlanner();
+const dropPlanner=new DropPlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
@@ -98,6 +100,7 @@ async function run():Promise<void>{
         forager.observe(pending.before,pending.action,failedReceipt);
         resourcePlanner.observe(pending.before,pending.action,failedReceipt);
         foodPlanner.observe(pending.before,pending.action,failedReceipt);
+        dropPlanner.observe(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
         unconfirmed=undefined;
@@ -111,6 +114,9 @@ async function run():Promise<void>{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         if(pending.action.type==="eat_food")
           foodPlanner.observe(pending.before,pending.action,{
+            id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
+        if(pending.action.type==="pickup_drop")
+          dropPlanner.observe(pending.before,pending.action,{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
@@ -154,11 +160,15 @@ async function run():Promise<void>{
       const canBeginForage=!economic && s.location==="Farm" &&
         d.action.type==="travel_to" && d.action.target==="FarmHouse" &&
         s.time<2000 && s.energy>45;
+      // Real drop recovery precedes further resource destruction and map touring.
+      const dropDecision=!economic && (canBeginForage||forager.isActive) ?
+        dropPlanner.propose(s) : undefined;
+      if(dropDecision){d=dropDecision;forageChosen=true;}
       // Work on immediate, measured materials before setting out for longer foraging.
-      const resourceDecision=canBeginForage && !forager.isActive ?
+      const resourceDecision=canBeginForage && !forager.isActive && !dropDecision ?
         resourcePlanner.propose(s,true) : undefined;
       if(resourceDecision){d=resourceDecision;forageChosen=true;}
-      if(!economic && !resourceDecision && (forager.isActive || canBeginForage)){
+      if(!economic && !dropDecision && !resourceDecision && (forager.isActive || canBeginForage)){
         const forageDecision=forager.propose(s,canBeginForage);
         if(forageDecision){d=forageDecision;forageChosen=true;}
       }
@@ -196,7 +206,7 @@ async function run():Promise<void>{
       console.log("[bigfish]",JSON.stringify({day:s.day,location:s.location,goal:goal.goal,action,reason:d.reason}));
       await say(d.speech,action,goal.notes);
       if(action.type==="wait"){await sleep(action.seconds*1000);continue;}
-      const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:action.type==="eat_food"?25000:15000;
+      const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:action.type==="eat_food"||action.type==="pickup_drop"?25000:15000;
       const before=bridge.getStateSequence();
       result=await bridge.send(action,timeout);
       console.log("[game]",result.ok?"ok":"failed",result.message);
@@ -237,6 +247,7 @@ async function run():Promise<void>{
         forager.observe(s,action,result);
         resourcePlanner.observe(s,action,result);
         foodPlanner.observe(s,action,result);
+        dropPlanner.observe(s,action,result);
       }
     }
   }

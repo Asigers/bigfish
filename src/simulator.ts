@@ -18,6 +18,7 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     tools:{hoe:true,wateringCan:true,axe:true,pickaxe:true,scythe:true,equipped:"hoe",waterLeft:40}
   };
   const savedChests=economy.chests;
+  const farmDrops:{x:number;y:number;itemId:string}[]=[];
   const farmResources:ResourceNode[]=[
     {x:7,y:7,kind:"twig",health:1},{x:8,y:7,kind:"stone",health:2},
     {x:9,y:8,kind:"weed",health:1},{x:10,y:9,kind:"tree",health:3}
@@ -47,6 +48,7 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     state.exits=exits[room]??[];
     state.forage=forageByRoom[room]??[];
     state.resources=room==="Farm"?farmResources:[];
+    state.drops=room==="Farm"?farmDrops:[];
     state.bed=room==="FarmHouse"?{x:5,y:5}:null;
     economy.shippingBin=room==="Farm"?{x:7,y:4}:null;
     economy.chests=room==="Farm"?savedChests:[];
@@ -99,6 +101,18 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
           add(found.itemId,1,-79,true);
         }
       }
+      else if(c.type==="pickup_drop"){
+        const index=farmDrops.findIndex(d=>d.itemId===c.itemId &&
+          Math.max(Math.abs(d.x-c.x),Math.abs(d.y-c.y))<=2);
+        if(state.location!=="Farm"||index<0||state.inventoryFree<=0)ok=false;
+        else{
+          const item=farmDrops[index];
+          // Mock natural walking into magnetic range before receiving inventory.
+          state.x=Math.max(0,item.x-1);state.y=Math.max(0,item.y-1);
+          farmDrops.splice(index,1);
+          add(item.itemId,1,item.itemId==="(O)390"?-300:-16,false);
+        }
+      }
       else if(c.type==="clear_resource"){
         const index=farmResources.findIndex(n=>n.x===c.x&&n.y===c.y&&n.kind===c.kind);
         const tool=c.kind==="stone"?"pickaxe":c.kind==="weed"?"scythe":"axe";
@@ -110,8 +124,10 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
           state.energy-=2;
           if(farmResources[index].health<=0){
             farmResources.splice(index,1);
-            add(c.kind==="stone"?"(O)390":c.kind==="weed"?"(O)771":"(O)388",
-              1,c.kind==="stone"?-300:0,false);
+            // A tool strike creates a world drop. Collection is a separate native
+            // magnet-pickup action, not an instant inventory injection.
+            farmDrops.push({x:c.x,y:c.y,
+              itemId:c.kind==="stone"?"(O)390":c.kind==="weed"?"(O)771":"(O)388"});
           }
         }
       }

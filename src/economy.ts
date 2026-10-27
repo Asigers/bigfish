@@ -67,8 +67,10 @@ export class EconomyPlanner {
     // Keep edible supplies for stamina recovery. Shipping is all-or-nothing per stack,
     // so selling any food here could remove the last emergency meal.
     const foodIds=new Set(s.food?.map(f=>f.id)??[]);
+    // Protect farm construction materials even when the game marks them saleable.
+    const reservedMaterials=new Set(["(O)388","(O)390","(O)771","(O)382","(O)92"]);
     const sellable=e.bag.filter(x=>x.sellable&&x.category!==-74&&x.count>0 &&
-      !foodIds.has(x.id));
+      !foodIds.has(x.id) && !reservedMaterials.has(x.id));
     if(s.location==="Farm"){
       // Selling has priority when money is blocked in produce, or the backpack is full.
       if(sellable.length&&e.shippingBin){
@@ -93,7 +95,7 @@ export class EconomyPlanner {
       }
       // Free inventory using storage for non-saleable non-tool resources.
       if(s.inventoryFree<=2&&e.chests.length){
-        const resources=e.bag.filter(x=>["(O)388","(O)390","(O)771","(O)382"].includes(x.id) ||
+        const resources=e.bag.filter(x=>reservedMaterials.has(x.id) ||
           (x.category!==-74&&!x.sellable&&x.category!==-99&&
             x.id.startsWith("(O)")&&!foodIds.has(x.id)));
         if(resources.length){

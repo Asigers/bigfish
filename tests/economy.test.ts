@@ -24,6 +24,15 @@ test("ship produce before purchasing; never ship seeds",()=>{
   const s:GameState={...base,economy:{...base.economy!,bag:[{id:"(O)24",count:3,category:-75,sellable:true},{id:"(O)472",count:2,category:-74,sellable:false}]}};
   assert.deepEqual(planner.propose(s)?.action,{type:"ship_item",itemId:"(O)24"});
 });
+test("do not ship building materials even when marked saleable",()=>{
+  const e=base.economy!;
+  const materials=["(O)388","(O)390","(O)771","(O)382","(O)92"];
+  const state:GameState={...base,economy:{...e,bag:materials.map(id=>
+    ({id,count:4,category:-16,sellable:true}))}};
+  const planner=new EconomyPlanner();
+  const d=planner.propose(state)?.action;
+  assert.notEqual(d?.type,"ship_item");
+});
 test("seed shopping is multi-map and respects actual price and current funds",()=>{
   const planner=new EconomyPlanner();
   assert.deepEqual(planner.propose(base)?.action,{type:"travel_to",target:"BusStop"});
