@@ -36,7 +36,7 @@ test("compile goal-specific executable/blocked DAG and enforce dependencies",()=
   assert.equal(campaign.tasks.find(t=>t.id==="craft_storage")?.status,"blocked");
   assert.equal(campaign.tasks.find(t=>t.id==="place_storage")?.status,"blocked");
   assert.equal(campaign.tasks.find(t=>t.id==="cash_reserve")?.status,"ready");
-  assert.equal(campaign.tasks.find(t=>t.id==="prepare_fields")?.status,"blocked"===campaign.tasks.find(t=>t.id==="prepare_fields")?.status?"blocked":"ready");
+  assert.equal(campaign.tasks.find(t=>t.id==="prepare_fields")?.status,"ready");
   assert.equal(campaignComplete(campaign),false);
   const wood:GameState={...farm,economy:{...farm.economy!,bag:[
     ...farm.economy!.bag,{id:"(O)388",count:50,category:-16,sellable:false}]},
