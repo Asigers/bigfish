@@ -121,7 +121,7 @@ async function run():Promise<void>{
         await sleep(1300);continue;
       }
       action=d.action;
-      console.log("[bigfish]",JSON.stringify({day:s.day,location:s.location,goal:goal.goal,action,reason:d.reason}));
+      console.log("[bigfish]",JSON.stringify({day:s.day,time:s.time,energy:Math.round(s.energy),location:s.location,goal:goal.goal,action,reason:d.reason}));
       await say(d.speech,action,goal.notes);
       if(action.type==="wait"){await sleep(action.seconds*1000);continue;}
       const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:15000;
