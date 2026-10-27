@@ -20,6 +20,11 @@ export type LooseDrop = Tile & { itemId:string };
 export type ResourceKind = "tree" | "stone" | "twig" | "weed";
 export type ResourceNode = Tile & { kind:ResourceKind; health:number };
 export type SurveyTile = Tile & { walkable:boolean; soil:boolean; occupied:boolean };
+export type SprinklerKind="basic"|"quality"|"iridium";
+export type SprinklerItem = Tile & {kind:SprinklerKind};
+export type SprinklerRecipe = {kind:SprinklerKind; itemId:string; learned:boolean;
+  canCraft:boolean; ingredients:{id:string;count:number}[]};
+export type SprinklerKit = {kind:SprinklerKind;count:number};
 export type Exit = Tile & { target: string };
 export type WorldLink = { from: string; to: string };
 export type GameState = {
@@ -27,7 +32,9 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; surveyTiles?:SurveyTile[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; sprinklerRecipes?:SprinklerRecipe[];
+  sprinklerKits?:SprinklerKit[]; installedSprinklers?:SprinklerItem[];
+  sprinklerSites?:Tile[]; isRaining?:boolean; surveyTiles?:SurveyTile[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -42,6 +49,8 @@ export type Action =
   | { type: "equip_tool"; tool: "hoe" | "watering_can" | "axe" | "pickaxe" | "scythe" }
   | { type: "refill_watering_can" | "collect_forage"; x: number; y: number }
   | { type:"clear_resource"; x:number; y:number; kind:ResourceKind }
+  | { type:"craft_sprinkler"; kind:SprinklerKind }
+  | { type:"place_sprinkler"; kind:SprinklerKind; x:number; y:number }
   | { type: "craft_chest" }
   | { type: "place_chest"; x:number; y:number }
   | { type: "sleep" }
@@ -83,6 +92,19 @@ export function validCropInfo(input:unknown):input is CropInfo {
     Number.isInteger(c.minHarvest)&&c.minHarvest>=1&&c.minHarvest<=100 &&
     typeof c.raised==="boolean"&&typeof c.needsWatering==="boolean";
 }
+const validSprinklerKind=(x:unknown):x is SprinklerKind=>
+  ["basic","quality","iridium"].includes(x as string);
+export function validSprinklerRecipe(input:unknown):input is SprinklerRecipe {
+  if(!record(input))return false;
+  const r=input as SprinklerRecipe;
+  const id={"basic":"(O)599","quality":"(O)621","iridium":"(O)645"};
+  return validSprinklerKind(r.kind)&&r.itemId===id[r.kind]&&
+    typeof r.learned==="boolean"&&typeof r.canCraft==="boolean"&&
+    Array.isArray(r.ingredients)&&r.ingredients.length>0&&r.ingredients.length<=8&&
+    r.ingredients.every(i=>record(i)&&typeof i.id==="string"&&
+      /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(i.id)&&
+      Number.isInteger(i.count)&&i.count>0&&i.count<=999);
+}
 export function validState(input: unknown): input is GameState {
   if (!record(input)) return false;
   const s=input as Partial<GameState>;
@@ -101,6 +123,18 @@ export function validState(input: unknown): input is GameState {
       s.surveyTiles.length<=225 && s.surveyTiles.every(t=>coordinate(t)&&
         typeof t.walkable==="boolean"&&typeof t.soil==="boolean"&&
         typeof t.occupied==="boolean")))
+    && (s.isRaining===undefined||typeof s.isRaining==="boolean")
+    && (s.sprinklerSites===undefined||(Array.isArray(s.sprinklerSites)&&
+      s.sprinklerSites.length<=80&&s.sprinklerSites.every(coordinate)))
+    && (s.installedSprinklers===undefined||(Array.isArray(s.installedSprinklers)&&
+      s.installedSprinklers.length<=160&&s.installedSprinklers.every(v=>coordinate(v)&&
+        ["basic","quality","iridium"].includes(v.kind))))
+    && (s.sprinklerKits===undefined||(Array.isArray(s.sprinklerKits)&&
+      s.sprinklerKits.length<=3&&s.sprinklerKits.every(v=>record(v)&&
+        ["basic","quality","iridium"].includes(v.kind)&&
+        Number.isInteger(v.count)&&v.count>=0&&v.count<=9999)))
+    && (s.sprinklerRecipes===undefined||(Array.isArray(s.sprinklerRecipes)&&
+      s.sprinklerRecipes.length<=3&&s.sprinklerRecipes.every(validSprinklerRecipe)))
     && (s.chestKits===undefined || (Number.isInteger(s.chestKits)&&s.chestKits>=0&&s.chestKits<=9999))
     && (s.canCraftChest===undefined || typeof s.canCraftChest==="boolean")
     && (s.placementSites===undefined || (Array.isArray(s.placementSites) &&
@@ -157,6 +191,15 @@ export function stateValidationIssues(input: unknown): string[] {
     coordinate(v)&&typeof (v as SurveyTile).walkable==="boolean"&&
     typeof (v as SurveyTile).soil==="boolean"&&
     typeof (v as SurveyTile).occupied==="boolean");
+  if(s.isRaining!==undefined&&typeof s.isRaining!=="boolean")issues.push("isRaining");
+  if(s.sprinklerSites!==undefined)checkArray("sprinklerSites",80,coordinate);
+  if(s.installedSprinklers!==undefined)checkArray("installedSprinklers",160,v=>
+    coordinate(v)&&validSprinklerKind((v as SprinklerItem).kind));
+  if(s.sprinklerKits!==undefined)checkArray("sprinklerKits",3,v=>record(v)&&
+    validSprinklerKind((v as SprinklerKit).kind)&&
+    Number.isInteger((v as SprinklerKit).count)&&
+    (v as SprinklerKit).count>=0&&(v as SprinklerKit).count<=9999);
+  if(s.sprinklerRecipes!==undefined)checkArray("sprinklerRecipes",3,validSprinklerRecipe);
   if(s.chestKits!==undefined && (!Number.isInteger(s.chestKits)||Number(s.chestKits)<0||Number(s.chestKits)>9999))issues.push("chestKits");
   if(s.canCraftChest!==undefined && typeof s.canCraftChest!=="boolean")issues.push("canCraftChest");
   if(s.placementSites!==undefined)checkArray("placementSites",80,coordinate);
