@@ -38,7 +38,10 @@ const dropPlanner=new DropPlanner();
 const infrastructure=new InfrastructurePlanner();
 const sprinklerPlanner=new SprinklerPlanner();
 const memory=new GoalMemory();
-const history=new FarmHistory();
+// Simulator/mock runs must not contaminate production acceptance evidence.
+const history=new FarmHistory(mock?
+  join(process.cwd(),"data","bigfish-history.mock.sqlite"):
+  join(process.cwd(),"data","bigfish-history.sqlite"));
 let brainSessionSave:string|undefined;
 let lastInvestmentReport="";
 const recent:ActionResult[]=[];
