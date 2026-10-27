@@ -82,7 +82,7 @@ test("no false crafting/placement on missing inputs, blocked site or unchanged i
   assert.equal(validateAgainstWorld({type:"place_sprinkler",kind:"basic",x:5,y:5},empty),false);
   const a:Action={type:"craft_sprinkler",kind:"basic"};
   assert.equal(actionObserved(a,base,{...base,sprinklerKits:[{kind:"basic",count:1}]}),false);
-  const badSite={...base,sprinklerSites:[],sprinklerKits:[{kind:"basic",count:1}]};
+  const badSite:GameState={...base,sprinklerSites:[],sprinklerKits:[{kind:"basic",count:1}]};
   assert.equal(validateAgainstWorld({type:"place_sprinkler",kind:"basic",x:5,y:5},badSite),false);
   assert.equal(reconcileSprinkler({...base,sprinklerRecipes:undefined},plan),undefined);
 });
