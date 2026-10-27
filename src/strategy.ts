@@ -53,6 +53,9 @@ export class GoalMemory{
       Number.isInteger(plan.targetPlots)&&plan.targetPlots>=0&&plan.targetPlots<=20 &&
       Number.isInteger(plan.occupiedPlots)&&plan.occupiedPlots>=0&&plan.occupiedPlots<=250 &&
       Array.isArray(plan.fieldTiles)&&plan.fieldTiles.length<=20 &&
+      Array.isArray(plan.protectedTiles)&&plan.protectedTiles.length<=80 &&
+      plan.protectedTiles.every(t=>Number.isInteger(t.x)&&Number.isInteger(t.y)&&
+        t.x>=0&&t.y>=0&&t.x<150&&t.y<150) &&
       plan.fieldTiles.every(t=>Number.isInteger(t.x)&&Number.isInteger(t.y)&&
         t.x>=0&&t.y>=0&&t.x<150&&t.y<150) &&
       (plan.preferredSeedId===null||
