@@ -29,7 +29,8 @@ export class FarmResourcePlanner {
       this.failures.clear();this.lastPosition="";
     }
     const pos=s.location+":"+s.x+":"+s.y;
-    if(this.lastPosition&&this.lastPosition!==pos)this.failures.clear();
+    // A successful step must not erase earlier unreachable approach tiles.
+    // Repeated route failures are forgotten only on the next in-game day.
     this.lastPosition=pos;
   }
   observe(s:GameState,action?:Action,result?:ActionResult):void{
