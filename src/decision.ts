@@ -63,8 +63,13 @@ export function parseDecision(raw:string):Decision {
     action={type:"buy_seed",itemId:a.itemId,count:Number(a.count)};
   else if(["store_item","withdraw_item"].includes(String(a.type))&&typeof a.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.itemId)&&Number.isInteger(a.count)&&Number(a.count)>0&&Number(a.count)<=9999&&Number.isInteger(a.x)&&Number.isInteger(a.y))
     action={type:a.type as "store_item"|"withdraw_item",itemId:a.itemId,count:Number(a.count),x:Number(a.x),y:Number(a.y)};
-  else if(a.type==="equip_tool"&&(a.tool==="hoe"||a.tool==="watering_can"))
-    action={type:"equip_tool",tool:a.tool};
+  else if(a.type==="clear_resource"&&Number.isInteger(a.x)&&Number.isInteger(a.y)&&
+    Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<150&&Number(a.y)<150 &&
+    ["tree","stone","twig","weed"].includes(String(a.kind)))
+    action={type:"clear_resource",x:Number(a.x),y:Number(a.y),
+      kind:a.kind as "tree"|"stone"|"twig"|"weed"};
+  else if(a.type==="equip_tool"&&["hoe","watering_can","axe","pickaxe","scythe"].includes(String(a.tool)))
+    action={type:"equip_tool",tool:a.tool as "hoe"|"watering_can"|"axe"|"pickaxe"|"scythe"};
   else if(a.type==="sleep")action={type:"sleep"};
   else throw Error("Unsupported action");
   return {action,speech:typeof d.speech==="string"?d.speech.slice(0,100):"",reason:typeof d.reason==="string"?d.reason.slice(0,120):""};
@@ -161,7 +166,11 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   if(a.type==="sleep")return s.location==="FarmHouse"&&s.bed!==null;
   if(a.type==="travel_to")return s.exits.some(e=>e.target===a.target);
   if(a.type==="move_to")return a.x>=0&&a.y>=0&&a.x<150&&a.y<150;
-  if(a.type==="equip_tool")return Boolean(s.economy && (a.tool==="hoe"?s.economy.tools.hoe:s.economy.tools.wateringCan));
+  if(a.type==="equip_tool")return Boolean(s.economy && ({
+    hoe:s.economy.tools.hoe,watering_can:s.economy.tools.wateringCan,
+    axe:s.economy.tools.axe??false,pickaxe:s.economy.tools.pickaxe??false,
+    scythe:s.economy.tools.scythe??false
+  }[a.tool]));
   if(a.type==="refill_watering_can")return Boolean(s.economy?.tools.wateringCan && s.waterSources?.some(t=>t.x===a.x&&t.y===a.y) && close(here,a));
   if(a.type==="buy_seed"){
     const shop=s.economy?.shop;
@@ -177,6 +186,9 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   }
   if(a.type==="collect_forage")return s.inventoryFree>0 && close(here,a) &&
     Boolean(s.forage?.some(item=>item.x===a.x&&item.y===a.y));
+  if(a.type==="clear_resource")return s.location==="Farm" && s.energy>=65 &&
+    s.inventoryFree>0 && close(here,a) &&
+    Boolean(s.resources?.some(n=>n.x===a.x&&n.y===a.y&&n.kind===a.kind));
   if(s.location!=="Farm"||!close(here,a))return false;
   if(a.type==="water_tile")return s.crops.some(c=>c.x===a.x&&c.y===a.y&&!c.watered);
   if(a.type==="harvest_crop")return s.inventoryFree>0&&s.crops.some(c=>c.x===a.x&&c.y===a.y&&c.ready);
