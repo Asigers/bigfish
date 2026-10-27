@@ -77,8 +77,9 @@ async function run():Promise<void>{
     if(unconfirmed){
       const pending=unconfirmed;
       const uncertain=bridge.getUncertain();
-      const failedReceipt=uncertain?.cmd.id===pending.commandId &&
-        uncertain.lateResult?.ok===false?uncertain.lateResult:undefined;
+      const failedReceipt=uncertain && pending.commandId &&
+        uncertain.cmd.id===pending.commandId && uncertain.lateResult?.ok===false
+        ? uncertain.lateResult : undefined;
       if(failedReceipt && pending.commandId){
         bridge.settleUncertain(pending.commandId,"failed-result");
         planner.observe(pending.before,[failedReceipt],pending.action);
