@@ -175,6 +175,7 @@ async function run():Promise<void>{
           }));
         }
       }
+      await memory.observeFarmOccupancy(s);
       const field=memory.get()?.farmPlan;
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
