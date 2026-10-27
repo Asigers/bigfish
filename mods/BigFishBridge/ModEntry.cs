@@ -482,8 +482,11 @@ public sealed class ModEntry : Mod
                     candidates.Add(new Point(point.X + dx, point.Y + dy));
                 }
                 bool pathFound = false;
+                // The engine computes a real collision-aware route. Limit candidate
+                // searches per command so distant debris cannot stall the game thread.
                 foreach (var candidate in candidates.OrderBy(c =>
-                    Math.Abs(c.X - player.TilePoint.X) + Math.Abs(c.Y - player.TilePoint.Y)))
+                    Math.Abs(c.X - player.TilePoint.X) + Math.Abs(c.Y - player.TilePoint.Y))
+                    .Take(4))
                 {
                     if (candidate.X < 0 || candidate.Y < 0 ||
                         !loc.isTileOnMap(candidate.X, candidate.Y)) continue;
