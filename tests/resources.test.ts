@@ -60,6 +60,17 @@ test("resource goals include chest stock, so storage does not trigger redundant 
   const stored:GameState={...base,economy:{...base.economy!,chests:[chest]}};
   assert.equal(new FarmResourcePlanner().propose(stored,true),undefined);
 });
+test("known blocked path remains blacklisted after a successful reposition",()=>{
+  const planner=new FarmResourcePlanner();
+  const farm={...base,resources:[{x:12,y:12,kind:"stone" as const,health:1}]};
+  const first=planner.propose(farm,true)?.action;
+  assert.equal(first?.type,"move_to");
+  planner.observe(farm,first,{id:"f1",ok:false,message:"no path"});
+  planner.observe(farm,first,{id:"f2",ok:false,message:"no path"});
+  planner.propose({...farm,x:5,y:5},true);
+  const next=planner.propose({...farm,x:4,y:4},true)?.action;
+  assert.notDeepEqual(next,first);
+});
 test("blocked approach candidates and failed tools are not spammed",()=>{
   const target={...base,resources:[{x:9,y:9,kind:"stone" as const,health:2}]};
   const p=new FarmResourcePlanner();
@@ -101,6 +112,14 @@ test("simulated farm resource can be hit with a real tool and material enters ba
     assert.equal(result.ok,true,result.message);
     const after=await bridge.waitForNextState(seq,4000,next=>actionObserved(action,before!,next));
     assert.equal(after.resources?.some(n=>n.x===7&&n.y===7),false);
-    assert.ok(after.economy?.bag.some(i=>i.id==="(O)388"&&i.count>0));
+    assert.ok(after.drops?.some(d=>d.itemId==="(O)388"&&d.x===7&&d.y===7));
+    assert.equal(after.economy?.bag.some(i=>i.id==="(O)388"),false);
+    const pickup={type:"pickup_drop" as const,x:7,y:7,itemId:"(O)388"};
+    const beforePickup=bridge.getState()!;
+    const pickupSequence=bridge.getStateSequence();
+    assert.equal((await bridge.send(pickup,4000)).ok,true);
+    const collected=await bridge.waitForNextState(pickupSequence,4000,
+      next=>actionObserved(pickup,beforePickup,next));
+    assert.ok(collected.economy?.bag.some(i=>i.id==="(O)388"&&i.count>0));
   }finally{stop();await bridge.stop();}
 });
