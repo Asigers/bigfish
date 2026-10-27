@@ -19,14 +19,15 @@ export type CropInfo = { seedId:string; harvestId:string; seasons:string[];
 export type LooseDrop = Tile & { itemId:string };
 export type ResourceKind = "tree" | "stone" | "twig" | "weed";
 export type ResourceNode = Tile & { kind:ResourceKind; health:number };
+export type SurveyTile = Tile & { walkable:boolean; soil:boolean; occupied:boolean };
 export type Exit = Tile & { target: string };
 export type WorldLink = { from: string; to: string };
 export type GameState = {
-  saveId: string; location: string; day: number; season: string; time: number;
+  saveId: string; location: string; year?:number; day: number; season: string; time: number;
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; surveyTiles?:SurveyTile[]; chestKits?:number; canCraftChest?:boolean; placementSites?:Tile[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -89,12 +90,17 @@ export function validState(input: unknown): input is GameState {
     && locName(s.location) && typeof s.season === "string" && typeof s.paused === "boolean"
     && (s.pauseReason === undefined || ["none","menu","event","time_stopped"].includes(s.pauseReason))
     && ["day","time","energy","x","y","inventoryFree"].every(k => Number.isFinite(s[k as keyof GameState]))
+    && (s.year===undefined||(Number.isInteger(s.year)&&s.year>=1&&s.year<=1000))
     && coordinate({x:s.x,y:s.y}) && Number(s.day) > 0 && Number(s.day) <= 28
     && Array.isArray(s.crops) && s.crops.length <= 250 && s.crops.every(c=>coordinate(c)&&typeof c.watered==="boolean"&&typeof c.ready==="boolean"&&
       ((c.seedId===undefined||c.seedId===null) || (typeof c.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.seedId))))
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
+    && (s.surveyTiles===undefined || (Array.isArray(s.surveyTiles) &&
+      s.surveyTiles.length<=225 && s.surveyTiles.every(t=>coordinate(t)&&
+        typeof t.walkable==="boolean"&&typeof t.soil==="boolean"&&
+        typeof t.occupied==="boolean")))
     && (s.chestKits===undefined || (Number.isInteger(s.chestKits)&&s.chestKits>=0&&s.chestKits<=9999))
     && (s.canCraftChest===undefined || typeof s.canCraftChest==="boolean")
     && (s.placementSites===undefined || (Array.isArray(s.placementSites) &&
@@ -134,6 +140,7 @@ export function stateValidationIssues(input: unknown): string[] {
   for (const k of numberFields) if (!Number.isFinite(s[k])) issues.push(k);
   if (!coordinate({x: s.x, y: s.y})) issues.push("player coordinates");
   if (typeof s.day !== "number" || s.day <= 0 || s.day > 28) issues.push("day range");
+  if (s.year!==undefined && (!Number.isInteger(s.year)||Number(s.year)<1||Number(s.year)>1000))issues.push("year");
   const checkArray = (key: string, max: number, validate: (v: unknown) => boolean) => {
     const values = s[key];
     if (!Array.isArray(values) || values.length > max) { issues.push(key + " array/length"); return; }
@@ -146,6 +153,10 @@ export function stateValidationIssues(input: unknown): string[] {
       (typeof (v as CropTile).seedId==="string" &&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as CropTile).seedId!))));
   if(s.cropCatalog!==undefined)checkArray("cropCatalog",150,validCropInfo);
+  if(s.surveyTiles!==undefined)checkArray("surveyTiles",225,v=>
+    coordinate(v)&&typeof (v as SurveyTile).walkable==="boolean"&&
+    typeof (v as SurveyTile).soil==="boolean"&&
+    typeof (v as SurveyTile).occupied==="boolean");
   if(s.chestKits!==undefined && (!Number.isInteger(s.chestKits)||Number(s.chestKits)<0||Number(s.chestKits)>9999))issues.push("chestKits");
   if(s.canCraftChest!==undefined && typeof s.canCraftChest!=="boolean")issues.push("canCraftChest");
   if(s.placementSites!==undefined)checkArray("placementSites",80,coordinate);

@@ -264,6 +264,32 @@ public sealed class ModEntry : Mod
                 tillable.Add(new { x, y });
             }
         }
+        // A small authoritative tile patch around the current farmer position.
+        // Unknown farm cells are NOT assumed to be walkable or constructible.
+        // M2 merges successive patches as the player explores; the game thread
+        // probes only 15 x 15 cells per snapshot.
+        var surveyTiles = new List<object>();
+        if (loc.Name == "Farm")
+        {
+            for (int dx = -7; dx <= 7; dx++)
+            for (int dy = -7; dy <= 7; dy++)
+            {
+                int x = player.TilePoint.X + dx, y = player.TilePoint.Y + dy;
+                if (x < 0 || y < 0 || x >= 150 || y >= 150) continue;
+                var tile = new Vector2(x, y);
+                if (!loc.isTileOnMap(tile)) continue;
+                var hasObject = loc.objects.ContainsKey(tile);
+                var hasFeature = loc.terrainFeatures.TryGetValue(tile, out var feature);
+                var bareSoil = hasFeature && feature is HoeDirt soil && soil.crop == null;
+                var occupied = hasObject || hasFeature && !bareSoil;
+                var soilReady = hasFeature && feature is HoeDirt ||
+                    loc.doesTileHaveProperty(x, y, "Diggable", "Back") != null;
+                var passable = !occupied &&
+                    loc.isTilePassable(new xTile.Dimensions.Location(x,y), Game1.viewport);
+                surveyTiles.Add(new { x, y, walkable = passable,
+                    soil = soilReady, occupied });
+            }
+        }
         // Bounded farm resource scan: no placed machines, paths, buildings, crops,
         // fruit trees, tapper trees, young trees, stumps or map-specific setpieces.
         var resources = new List<object>();
@@ -468,10 +494,10 @@ public sealed class ModEntry : Mod
             economy,
             saveId = Game1.uniqueIDForThisGame.ToString(),
             location = loc.Name,
-            day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
+            year = Game1.year, day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, chestKits, canCraftChest, placementSites,
+            crops, emptyPlots, tillable, surveyTiles, seeds, chestKits, canCraftChest, placementSites,
             cropCatalog, food, forage, resources, drops, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()

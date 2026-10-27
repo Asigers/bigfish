@@ -1,5 +1,6 @@
 import type { Action, CropInfo, Decision, GameState, Tile } from "./types.ts";
 import type { Strategy } from "./economy.ts";
+import {routeCorridors,sprinklerIdeas,type FarmMap,type SprinklerIdea} from "./farm-map.ts";
 
 export type FarmDayOutcome={
   dayKey:string;targetPlots:number; openingGold:number; closingGold:number;
@@ -12,7 +13,7 @@ export type CropEstimate={
 };
 export type FarmPlan={
   saveId:string; dayKey:string; targetPlots:number; occupiedPlots:number; fieldTiles:Tile[];
-  protectedTiles:Tile[];
+  protectedTiles:Tile[]; sprinklerIdeas?:SprinklerIdea[];
   preferredSeedId:string|null; crops:CropEstimate[];
   reason:string; revision:string; costKnown:boolean;
 };
@@ -55,7 +56,7 @@ const chosenCrop=(s:GameState,estimates:CropEstimate[]):string|null=>{
 };
 /** Build a small, conservative field in real observed terrain; no off-map imagined plots. */
 export function buildFarmPlan(s:GameState,strategy:Strategy,
-  previous?:FarmDayOutcome,prior?:FarmPlan):FarmPlan|undefined {
+  previous?:FarmDayOutcome,prior?:FarmPlan,farmMap?:FarmMap):FarmPlan|undefined {
   if(s.location!=="Farm"||!s.economy||!s.cropCatalog?.length)return;
   const currentPlots=s.crops.length+s.emptyPlots.length;
   let target=Math.max(currentPlots,Math.min(20,strategy.seedReserve));
@@ -81,12 +82,17 @@ export function buildFarmPlan(s:GameState,strategy:Strategy,
   // shipping bin unplanted. Existing crops are grandfathered, never destroyed.
   const preserve=[s.economy.shippingBin,...s.exits,...s.economy.chests]
     .filter((t):t is Tile=>t!==null);
-  const protectedTiles=s.tillable.filter(t=>preserve.some(p=>distance(t,p)<=1))
-    .map(t=>({x:t.x,y:t.y})).slice(0,80);
+  const travelCorridors=routeCorridors(s,farmMap);
+  const protectedTiles=[...new Map([
+    ...s.tillable.filter(t=>preserve.some(p=>distance(t,p)<=1)),
+    ...travelCorridors
+  ].map(t=>[key(t),{x:t.x,y:t.y}])).values()].slice(0,80);
+  const protectedKeys=new Set(protectedTiles.map(key));
   const priorSelection=new Set(prior?.saveId===s.saveId && prior.dayKey===s.season+":"+s.day?
     prior.fieldTiles.map(key):[]);
   const candidates=s.tillable.filter(t=>t.x<150&&t.y<150&&!reserved.has(key(t))&&
-      !blocked.has(key(t))&&!preserve.some(p=>distance(t,p)<=1));
+      !blocked.has(key(t))&&!protectedKeys.has(key(t))&&
+      !preserve.some(p=>distance(t,p)<=1));
   const targetTiles=[...existing];
   while(targetTiles.length<target&&candidates.length){
     candidates.sort((a,b)=>{
@@ -101,9 +107,11 @@ export function buildFarmPlan(s:GameState,strategy:Strategy,
   }
   const available=[...new Map(targetTiles.map(t=>[key(t),t])).values()].slice(0,20);
   const estimates=rankedCrops(s);
+  const ideas=farmMap?sprinklerIdeas(s,farmMap,available,protectedTiles):undefined;
   return {saveId:s.saveId,dayKey:s.season+":"+s.day,targetPlots:available.length,
     occupiedPlots:s.crops.length,
     fieldTiles:available,protectedTiles,
+    ...(ideas?{sprinklerIdeas:ideas}:{}),
     preferredSeedId:chosenCrop(s,estimates),crops:estimates.slice(0,20),
     reason:strategy.goal+" on "+available.length+" observed plots, "+daysLeft(s)+" season days remain",
     revision,costKnown:estimates.some(e=>e.observedSeedPrice!==null)};
