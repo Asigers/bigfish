@@ -68,7 +68,8 @@ export class EconomyPlanner {
     const validPlan=farmPlan?.saveId===s.saveId&&
       farmPlan.dayKey===s.season+":"+s.day?farmPlan:undefined;
     const desiredSeeds=validPlan?
-      Math.max(0,validPlan.targetPlots-s.crops.length):strategy.seedReserve;
+      Math.max(0,validPlan.targetPlots-
+        (s.location==="Farm"?s.crops.length:validPlan.occupiedPlots)):strategy.seedReserve;
     const needSeeds=seedCount<desiredSeeds;
     // Keep edible supplies for stamina recovery. Shipping is all-or-nothing per stack,
     // so selling any food here could remove the last emergency meal.
