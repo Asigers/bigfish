@@ -13,6 +13,7 @@ export type EconomyState = {
 export type SeedStack = { id: string; count: number };
 export type ForageItem = Tile & { itemId: string };
 export type FoodItem = { id:string; count:number; restoreEnergy:number };
+export type LooseDrop = Tile & { itemId:string };
 export type ResourceKind = "tree" | "stone" | "twig" | "weed";
 export type ResourceNode = Tile & { kind:ResourceKind; health:number };
 export type Exit = Tile & { target: string };
@@ -22,7 +23,7 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; food?: FoodItem[]; forage?: ForageItem[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -31,6 +32,7 @@ export type Action =
   | { type: "plant_seed"; x: number; y: number; seedId: string }
   | { type: "travel_to"; target: string }
   | { type: "ship_item" | "eat_food"; itemId: string }
+  | { type:"pickup_drop"; x:number; y:number; itemId:string }
   | { type: "buy_seed"; itemId: string; count: number }
   | { type: "store_item" | "withdraw_item"; x: number; y: number; itemId: string; count: number }
   | { type: "equip_tool"; tool: "hoe" | "watering_can" | "axe" | "pickaxe" | "scythe" }
@@ -76,6 +78,9 @@ export function validState(input: unknown): input is GameState {
     && (s.forage === undefined || (Array.isArray(s.forage) && s.forage.length <= 80 &&
       s.forage.every(f=>coordinate(f)&&typeof f.itemId==="string"&&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(f.itemId))))
+    && (s.drops===undefined || (Array.isArray(s.drops)&&s.drops.length<=80 &&
+      s.drops.every(d=>coordinate(d)&&typeof d.itemId==="string"&&
+        /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(d.itemId))))
     && (s.resources === undefined || (Array.isArray(s.resources) && s.resources.length <= 120 &&
       s.resources.every(n => coordinate(n) && ["tree","stone","twig","weed"].includes(n.kind) &&
         Number.isFinite(n.health) && n.health>=0 && n.health<=1000)))
@@ -118,6 +123,9 @@ export function stateValidationIssues(input: unknown): string[] {
     checkArray("forage", 80, v => coordinate(v) && record(v) &&
       typeof (v as ForageItem).itemId === "string" &&
       /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as ForageItem).itemId));
+  if(s.drops!==undefined)
+    checkArray("drops",80,v=>coordinate(v)&&record(v)&&
+      typeof v.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.itemId));
   if(s.resources !== undefined)
     checkArray("resources",120, v=>coordinate(v) &&
       ["tree","stone","twig","weed"].includes((v as ResourceNode).kind) &&
