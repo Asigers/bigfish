@@ -44,6 +44,10 @@ public sealed class ModEntry : Mod
     private ModConfig config = new();
     private RemoteCommand? active;
     private DateTime movementStarted;
+    private DateTime foodStartedAt;
+    private float foodEnergyBefore;
+    private string foodItemId = "";
+    private int foodItemCountBefore;
     private DateTime lastMovementDiagnostic;
     private Point movementOrigin;
     private Point movementDestination;
@@ -306,6 +310,15 @@ public sealed class ModEntry : Mod
                 .Select(w => new { from = l.Name, to = w.TargetName }))
             .Take(300).ToArray();
         Point? bed = loc is FarmHouse home && home.GetPlayerBed() != null ? home.GetPlayerBedSpot() : null;
+        // Only real, beneficial edible objects. Stardrop/quest objects are protected.
+        var food = player.Items.OfType<SObject>()
+            .Where(o => o.Edibility > 0 && o.staminaRecoveredOnConsumption() > 0 &&
+                !o.questItem.Value && o.QualifiedItemId != "(O)434" &&
+                o.QualifiedItemId.StartsWith("(O)"))
+            .GroupBy(o => o.QualifiedItemId).Take(48)
+            .Select(g => new { id = g.Key, count = g.Sum(o => o.Stack),
+                restoreEnergy = Math.Min(500, g.First().staminaRecoveredOnConsumption()) })
+            .ToArray();
         var bag = player.Items.Where(i => i != null && i.QualifiedItemId.StartsWith("(O)"))
             .GroupBy(i => i!.QualifiedItemId).Take(60)
             .Select(g => new { id = g.Key, count = g.Sum(i => i!.Stack),
@@ -363,7 +376,7 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, forage, resources, exits, worldLinks = links, waterSources,
+            crops, emptyPlots, tillable, seeds, food, forage, resources, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
@@ -449,6 +462,31 @@ public sealed class ModEntry : Mod
                 var collected = removed && afterCount > beforeCount;
                 Finish(cmd, collected, collected ? "forage collected" :
                     "native pickup lacked object removal or inventory increase");
+                return;
+            }
+            if (cmd.Type == "eat_food")
+            {
+                if (player.Stamina >= player.MaxStamina - 12 || player.isEating)
+                { Finish(cmd, false, "not hungry or already eating"); return; }
+                var index = player.Items.ToList().FindIndex(i =>
+                    i is SObject o && o.QualifiedItemId == cmd.ItemId &&
+                    o.Edibility > 0 && o.staminaRecoveredOnConsumption() > 0 &&
+                    !o.questItem.Value && o.QualifiedItemId != "(O)434");
+                if (index < 0)
+                { Finish(cmd, false, "safe edible item unavailable"); return; }
+                player.CurrentToolIndex = index;
+                foodItemId = cmd.ItemId;
+                foodItemCountBefore = player.Items
+                    .Where(i => i?.QualifiedItemId == cmd.ItemId).Sum(i => i!.Stack);
+                foodEnergyBefore = player.Stamina;
+                foodStartedAt = DateTime.UtcNow;
+                // Eat via the normal farmer method to retain actual consumption and animation.
+                player.eatHeldObject();
+                var countAfter = player.Items
+                    .Where(i => i?.QualifiedItemId == cmd.ItemId).Sum(i => i!.Stack);
+                if (countAfter >= foodItemCountBefore || !player.isEating)
+                { Finish(cmd, false, "native eating did not consume one item"); return; }
+                active = cmd;
                 return;
             }
             if (cmd.Type == "equip_tool")
@@ -756,6 +794,19 @@ public sealed class ModEntry : Mod
         if (active == null) return;
         var cmd = active;
         var player = Game1.player;
+        if (cmd.Type == "eat_food")
+        {
+            if (player.Stamina > foodEnergyBefore)
+            {
+                Finish(cmd, true, "food consumed and energy recovered");
+                return;
+            }
+            if ((DateTime.UtcNow - foodStartedAt).TotalSeconds > 15)
+            {
+                Finish(cmd, false, "eating did not restore energy in time");
+            }
+            return;
+        }
         if ((DateTime.UtcNow - lastMovementDiagnostic).TotalSeconds >= 4 &&
             !Near(player.TilePoint, movementDestination.X, movementDestination.Y))
         {
