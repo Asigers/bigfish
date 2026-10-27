@@ -206,6 +206,34 @@ public sealed class ModEntry : Mod
         tree.growthStage.Value >= 5 && !tree.tapped.Value &&
         !tree.stump.Value && tree.health.Value > 0;
 
+    private static readonly (string Kind,string Recipe,string ItemId)[] SprinklerKinds = {
+        ("basic", "Sprinkler", "(O)599"),
+        ("quality", "Quality Sprinkler", "(O)621"),
+        ("iridium", "Iridium Sprinkler", "(O)645")
+    };
+    private static (string Kind,string Recipe,string ItemId)? SprinklerType(string kind)
+    {
+        foreach (var data in SprinklerKinds)
+            if (data.Kind == kind) return data;
+        return null;
+    }
+    private static int OwnedItemCount(Farmer farmer, string itemId) =>
+        farmer.Items.Where(i => i?.QualifiedItemId == itemId).Sum(i => i!.Stack);
+    private static bool SprinklerPlaceable(GameLocation loc,int x,int y)
+    {
+        if (loc.Name != "Farm" || x < 0 || y < 0 || x >= 150 || y >= 150)
+            return false;
+        var tile = new Vector2(x,y);
+        if (!loc.isTileOnMap(tile) || loc.objects.ContainsKey(tile) ||
+            loc.terrainFeatures.ContainsKey(tile) || !loc.CanItemBePlacedHere(tile) ||
+            loc.doesTileHavePropertyNoNull(x,y,"NoSprinklers","Back") == "T")
+            return false;
+        var bin = loc is Farm farm ? farm.GetStarterShippingBinLocation() : Vector2.Zero;
+        if (Math.Abs(x-bin.X)+Math.Abs(y-bin.Y)<=2) return false;
+        if (Exits(loc).Where(ValidNavigableExit).Any(w =>
+            Math.Abs(x-w.X)+Math.Abs(y-w.Y)<=2)) return false;
+        return true;
+    }
     private object Snapshot()
     {
         var player = Game1.player;
@@ -411,6 +439,43 @@ public sealed class ModEntry : Mod
             .Select(g => new { id = g.Key, count = g.Sum(o => o.Stack),
                 restoreEnergy = Math.Min(500, g.First().staminaRecoveredOnConsumption()) })
             .ToArray();
+        var sprinklerRecipes = SprinklerKinds
+            .Where(spec => CraftingRecipe.craftingRecipes.ContainsKey(spec.Recipe))
+            .Select(spec => new { spec, recipe = new CraftingRecipe(spec.Recipe, false) })
+            // Custom-modified category recipes aren't safe to consume using simple item IDs.
+            .Where(row => row.recipe.recipeList.Count>0 && row.recipe.recipeList.Count<=8 &&
+                row.recipe.recipeList.All(item => item.Value>0&&item.Value<=999 &&
+                    item.Key.All(char.IsLetterOrDigit)))
+            .Select(row => new {
+                kind = row.spec.Kind, itemId = row.spec.ItemId,
+                learned = player.craftingRecipes.ContainsKey(row.spec.Recipe),
+                canCraft = player.craftingRecipes.ContainsKey(row.spec.Recipe) &&
+                    row.recipe.doesFarmerHaveIngredientsInInventory(),
+                ingredients = row.recipe.recipeList.Select(item =>
+                    new { id = "(O)" + item.Key, count = item.Value }).ToArray()
+            }).ToArray();
+        var sprinklerKits = SprinklerKinds.Select(spec => new {kind = spec.Kind,
+            count = OwnedItemCount(player,spec.ItemId)}).ToArray();
+        var installedSprinklers = loc.Name=="Farm" ?
+            loc.objects.Pairs.Where(pair => pair.Value is SObject o && o.IsSprinkler() &&
+                pair.Key.X>=0 && pair.Key.Y>=0 && pair.Key.X<150 && pair.Key.Y<150)
+            .Take(160).Select(pair => new {x=(int)pair.Key.X,y=(int)pair.Key.Y,
+                kind = pair.Value.QualifiedItemId == "(O)599"?"basic":
+                    pair.Value.QualifiedItemId == "(O)621"?"quality":"iridium"}).ToArray()
+            : Array.Empty<object>();
+        var sprinklerSites=new List<object>();
+        if(loc.Name=="Farm")
+        {
+            for(int dx=-7;dx<=7&&sprinklerSites.Count<80;dx++)
+            for(int dy=-7;dy<=7&&sprinklerSites.Count<80;dy++)
+            {
+                var x=player.TilePoint.X+dx;
+                var y=player.TilePoint.Y+dy;
+                if(SprinklerPlaceable(loc,x,y))
+                    sprinklerSites.Add(new {x,y});
+            }
+        }
+        var isRaining = loc.IsRainingHere();
         var chestKits = player.Items.Where(i => i?.QualifiedItemId == "(BC)130")
             .Sum(i => i!.Stack);
         var canCraftChest = player.craftingRecipes.ContainsKey("Chest") &&
@@ -497,7 +562,9 @@ public sealed class ModEntry : Mod
             year = Game1.year, day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, surveyTiles, seeds, chestKits, canCraftChest, placementSites,
+            crops, emptyPlots, tillable, surveyTiles, seeds,
+            sprinklerRecipes, sprinklerKits, installedSprinklers, sprinklerSites, isRaining,
+            chestKits, canCraftChest, placementSites,
             cropCatalog, food, forage, resources, drops, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
@@ -668,6 +735,63 @@ public sealed class ModEntry : Mod
                 if (countAfter >= foodItemCountBefore || !player.isEating)
                 { Finish(cmd, false, "native eating did not consume one item"); return; }
                 active = cmd;
+                return;
+            }
+            if (cmd.Type == "craft_sprinkler")
+            {
+                var spec=SprinklerType(cmd.Kind);
+                if(loc.Name!="Farm"||!spec.HasValue||
+                    !player.craftingRecipes.ContainsKey(spec.Value.Recipe)||
+                    !CraftingRecipe.craftingRecipes.ContainsKey(spec.Value.Recipe))
+                { Finish(cmd,false,"unsupported or locked sprinkler recipe"); return; }
+                var recipe=new CraftingRecipe(spec.Value.Recipe,false);
+                var crafted=recipe.createItem();
+                if(crafted.QualifiedItemId!=spec.Value.ItemId||
+                    recipe.recipeList.Count==0||recipe.recipeList.Count>8||
+                    recipe.recipeList.Any(entry=>entry.Value<1||entry.Value>999||
+                        !entry.Key.All(char.IsLetterOrDigit))||
+                    !recipe.doesFarmerHaveIngredientsInInventory()||
+                    !player.couldInventoryAcceptThisItem(crafted))
+                { Finish(cmd,false,"materials, output, or space unavailable"); return; }
+                var before=OwnedItemCount(player,spec.Value.ItemId);
+                var ingredientCounts=recipe.recipeList.ToDictionary(
+                    entry=>entry.Key,entry=>OwnedItemCount(player,"(O)"+entry.Key));
+                recipe.consumeIngredients(null);
+                var added=player.addItemToInventoryBool(crafted);
+                var materialsSpent=recipe.recipeList.All(entry=>
+                    OwnedItemCount(player,"(O)"+entry.Key)<ingredientCounts[entry.Key]);
+                var success=added&&materialsSpent&&OwnedItemCount(player,spec.Value.ItemId)>before;
+                if(success)
+                {
+                    player.craftingRecipes[spec.Value.Recipe]+=recipe.numberProducedPerCraft;
+                    Game1.stats.checkForCraftingAchievements();
+                    loc.playSound("coin");
+                }
+                Finish(cmd,success,success?"real sprinkler recipe consumed":"sprinkler craft state inconsistent");
+                return;
+            }
+            if (cmd.Type == "place_sprinkler")
+            {
+                var spec=SprinklerType(cmd.Kind);
+                if(!spec.HasValue||!Near(player.TilePoint,cmd.X,cmd.Y)||
+                    !SprinklerPlaceable(loc,cmd.X,cmd.Y))
+                { Finish(cmd,false,"not an observed legal sprinkler site");return; }
+                var index=player.Items.ToList().FindIndex(i=>
+                    i is SObject o&&o.QualifiedItemId==spec.Value.ItemId&&o.IsSprinkler());
+                if(index<0)
+                { Finish(cmd,false,"sprinkler kit not in backpack");return; }
+                var tile=new Vector2(cmd.X,cmd.Y);
+                var kit=(SObject)player.Items[index]!;
+                var placed=kit.placementAction(loc,cmd.X*64,cmd.Y*64,player);
+                var observed=loc.objects.TryGetValue(tile,out var installed)&&
+                    installed is SObject sprinkler && sprinkler.QualifiedItemId==spec.Value.ItemId &&
+                    sprinkler.IsSprinkler();
+                if(placed&&observed)
+                {
+                    player.Items[index]=player.Items[index]!.ConsumeStack(1);
+                    Finish(cmd,true,"real sprinkler installed on farm");
+                }
+                else Finish(cmd,false,"native sprinkler placement unverified");
                 return;
             }
             if (cmd.Type == "craft_chest")
