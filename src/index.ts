@@ -129,6 +129,7 @@ async function run():Promise<void>{
       // optional same-type action candidates and a voiced character.
       const economic=economy.propose(s,goal);
       let d:Decision=economic??planner.decide(s);
+      let forageChosen=false;
       // Productive gathering begins only after farming and financial errands have
       // no action; once started, the trip continues across maps until bounded.
       const canBeginForage=!economic && s.location==="Farm" &&
@@ -136,7 +137,7 @@ async function run():Promise<void>{
         s.time<2000 && s.energy>45;
       if(!economic && (forager.isActive || canBeginForage)){
         const forageDecision=forager.propose(s,canBeginForage);
-        if(forageDecision)d=forageDecision;
+        if(forageDecision){d=forageDecision;forageChosen=true;}
       }
       const toolAction=requiredTool(s,d.action);
       if(toolAction)d={action:toolAction,reason:"Prepare correct real game tool",speech:"先拿好工具。"};
@@ -148,7 +149,7 @@ async function run():Promise<void>{
           const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can"];
           // Valid world action is not enough for money/inventory policy: the deterministic
           // decision also enforces seed budgets and preservation of essential supplies.
-          if(!economyTransaction.includes(d.action.type) &&
+          if(!forageChosen && !economyTransaction.includes(d.action.type) &&
               proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
             d=proposed;
           else if(proposed.speech) d={...d,speech:proposed.speech};
