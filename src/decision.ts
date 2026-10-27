@@ -1,5 +1,6 @@
 import type { Action, Decision, GameState, Tile, ActionResult } from "./types.ts";
 import { actionKey } from "./types.ts";
+import { plannedSeed, withinPlan, type FarmPlan } from "./farm-plan.ts";
 
 const wait=(reason:string):Decision=>({action:{type:"wait",seconds:5},reason,speech:"稍微观察一下。"});
 const decision=(action:Action,reason:string,speech="本鲸继续干活。"):Decision=>({action,reason,speech});
@@ -103,7 +104,7 @@ export class Autopilot {
       this.failures.set(k,(this.failures.get(k)??0)+1);
     }
   }
-  decide(s:GameState):Decision {
+  decide(s:GameState,farmPlan?:FarmPlan):Decision {
     this.syncDay(s);
     if(s.paused)return wait("Game menu or cutscene active");
     const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
@@ -149,13 +150,15 @@ export class Autopilot {
     }
     const water=choose(s.crops.filter(c=>!c.watered),t=>({type:"water_tile",x:t.x,y:t.y}),"Water dry crops","庄稼渴坏了。");
     if(water)return water;
-    if(s.seeds.length>0){
-      const seed=s.seeds[0];
-      const plant=choose(s.emptyPlots,t=>({type:"plant_seed",x:t.x,y:t.y,seedId:seed.id}),"Plant available seeds","来种点东西。");
+    const seed=farmPlan?plannedSeed(s,farmPlan):s.seeds[0]?.id;
+    if(seed){
+      const plant=choose(s.emptyPlots.filter(t=>withinPlan(farmPlan,t)),
+        t=>({type:"plant_seed",x:t.x,y:t.y,seedId:seed}),"Plant planned seasonal crop","按照农场布局播种。");
       if(plant)return plant;
       // Till one tile only after the existing plot pool has been exhausted.
       if(s.emptyPlots.length===0){
-        const till=choose(s.tillable,t=>({type:"till_tile",x:t.x,y:t.y}),"Prepare soil","开垦新土地！");
+        const till=choose(s.tillable.filter(t=>withinPlan(farmPlan,t)),
+          t=>({type:"till_tile",x:t.x,y:t.y}),"Prepare planned field tile","按规划开垦田地。");
         if(till)return till;
       }
     }
