@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { GameBridge } from "./bridge.ts";
+import { GameBridge, CommandOutcomeUnknownError } from "./bridge.ts";
 import { Autopilot, validateAgainstWorld } from "./decision.ts";
 import { PiBrain } from "./brain.ts";
 import { EconomyPlanner, DEFAULT_STRATEGY } from "./economy.ts";
@@ -24,7 +24,10 @@ let nextDialogueAt=0;
 let stopping=false;
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 let stopDemo:(()=>void)|undefined;
-type Unconfirmed={action:Action;before:GameState;sequence:number;lastWarningAt:number};
+type Unconfirmed={
+  action:Exclude<Action,{type:"wait"}>;before:GameState;sequence:number;
+  lastWarningAt:number;since:number;commandId?:string;
+};
 let unconfirmed:Unconfirmed|undefined;
 function requiredTool(state:GameState,action:Action):Action|undefined{
   const tools=state.economy?.tools;
@@ -57,15 +60,30 @@ async function run():Promise<void>{
     if(!s){await sleep(300);continue;}
     if(unconfirmed){
       const pending=unconfirmed;
-      if(bridge.getStateSequence()>pending.sequence &&
+      const uncertain=bridge.getUncertain();
+      const failedReceipt=uncertain?.cmd.id===pending.commandId &&
+        uncertain.lateResult?.ok===false?uncertain.lateResult:undefined;
+      if(failedReceipt && pending.commandId){
+        bridge.settleUncertain(pending.commandId,"failed-result");
+        planner.observe(pending.before,[failedReceipt],pending.action);
+        economy.update(pending.before,pending.action,false);
+        recent.push(failedReceipt);if(recent.length>8)recent.shift();
+        console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
+        unconfirmed=undefined;
+      }else if(bridge.getStateSequence()>pending.sequence &&
         actionObserved(pending.action,pending.before,s)){
+        if(pending.commandId && uncertain?.cmd.id===pending.commandId)
+          bridge.settleUncertain(pending.commandId,"observed");
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
       }else{
-        if(Date.now()-pending.lastWarningAt>15000){
+        if(Date.now()-pending.lastWarningAt>=15000){
           pending.lastWarningAt=Date.now();
-          console.warn("[game] waiting for state confirmation before issuing another command:",
-            pending.action.type,"observed location="+s.location,"day="+s.day);
+          const urgent=Date.now()-pending.since>=45000;
+          console.warn(urgent?"[game] MANUAL ATTENTION REQUIRED: unresolved action":
+            "[game] reconciling action; no new commands:",
+            pending.action.type,"at "+s.location,"day="+s.day,
+            "receipt="+(uncertain?.lateResult?.ok===true?"success":uncertain?.lateResult?.ok===false?"failure":"pending"));
         }
         await sleep(700);
         continue;
@@ -135,7 +153,7 @@ async function run():Promise<void>{
           await bridge.waitForNextState(before,6000,
             observed=>actionObserved(action!,s,observed));
         }catch{
-          unconfirmed={action,before:s,sequence:before,lastWarningAt:Date.now()};
+          unconfirmed={action,before:s,sequence:before,lastWarningAt:Date.now(),since:Date.now()};
           console.warn("[game] command acknowledged, but resulting state is not confirmed;",
             "pausing commands until game state catches up",action.type);
         }
@@ -146,8 +164,17 @@ async function run():Promise<void>{
       if(!result.ok)await say("哎呀，刚才失败了："+result.message,{type:"wait",seconds:1},goal.notes,false);
       await sleep(result.ok?200:1200);
     }catch(error){
-      result={id:"local-failure",ok:false,message:error instanceof Error?error.message:String(error)};
-      console.error("[bigfish]",result.message);
+      if(error instanceof CommandOutcomeUnknownError && action && action.type!=="wait"){
+        unconfirmed={action,before:s,sequence:bridge.getStateSequence(),
+          lastWarningAt:Date.now(),since:Date.now(),commandId:error.commandId};
+        console.error("[game] command timeout without reliable result; "+
+          "holding further actions until state/result reconciles",error.message);
+        action=undefined;result=undefined;
+      }else{
+        result={id:"local-failure",ok:false,
+          message:error instanceof Error?error.message:String(error)};
+        console.error("[bigfish]",result.message);
+      }
       await sleep(2300);
     }finally{
       if(result&&action){
