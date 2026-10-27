@@ -207,16 +207,10 @@ async function run():Promise<void>{
         try{
           const proposed=await brain.decide(s,recent,pendingViewerEvents);
           pendingViewerEvents.length=0;
-          const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can","eat_food"];
-          // Valid world action is not enough for money/inventory policy: the deterministic
-          // decision also enforces seed budgets and preservation of essential supplies.
-          if(!forageChosen && !economyTransaction.includes(d.action.type) &&
-              proposed.action.type===d.action.type &&
-              // Plot coordinates and seed identities belong to the saved farm plan.
-              (!field || !["plant_seed","till_tile","buy_seed"].includes(d.action.type)) &&
-              validateAgainstWorld(proposed.action,s))
-            d=proposed;
-          else if(proposed.speech) d={...d,speech:proposed.speech};
+          // Pi sets the daily strategy and narrates the action; the field planner
+          // and world executor own exact tiles, item IDs and route choices.
+          // An equally-typed model action may still target the wrong plot or warp.
+          if(proposed.speech)d={...d,speech:proposed.speech};
         }catch(error){console.warn("[brain] using safe plan:",error instanceof Error?error.message:String(error));}
       }
       // The model can take many seconds; never issue a decision based on a different
