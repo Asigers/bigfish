@@ -109,5 +109,12 @@ export class FarmHistory {
       meanWaterEnergy:water>0?(actions.water_energy??0)/water:0,
       observedFailureRate:count>0?(actions.failures??0)/count:0};
   }
+  consecutiveDays(saveId:string,days=7):boolean{
+    if(!saveId||!Number.isInteger(days)||days<1||days>112)return false;
+    const rows=this.db.prepare(`SELECT ordinal FROM farm_days WHERE save_id=?
+      ORDER BY ordinal DESC LIMIT ?`).all(saveId,days) as {ordinal:number}[];
+    return rows.length===days&&rows.every((row,i)=>
+      i===0||rows[i-1].ordinal===row.ordinal+1);
+  }
   close():void{this.db.close();}
 }
