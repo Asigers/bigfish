@@ -1,5 +1,6 @@
 import type { Action, Decision, GameState, Tile } from "./types.ts";
 import { actionKey } from "./types.ts";
+import { bestPurchase, type FarmPlan } from "./farm-plan.ts";
 export type Strategy = { goal: "profit" | "expand" | "save"; targetGold: number; seedReserve: number; notes: string };
 export const DEFAULT_STRATEGY: Strategy = { goal: "profit", targetGold: 2500, seedReserve: 6, notes: "Grow, ship, reinvest" };
 const d=(action:Action,reason:string,speech:string):Decision=>({action,reason,speech});
@@ -50,7 +51,7 @@ export class EconomyPlanner {
     if(action&&!ok)this.failed.set(s.location+":"+actionKey(action),(this.failed.get(s.location+":"+actionKey(action))??0)+1);
     if(action?.type==="buy_seed"&&ok)this.shopAttempted=true;
   }
-  propose(s:GameState,strategy:Strategy=DEFAULT_STRATEGY):Decision|undefined{
+  propose(s:GameState,strategy:Strategy=DEFAULT_STRATEGY,farmPlan?:FarmPlan):Decision|undefined{
     this.update(s);
     const e=s.economy;
     if(!e||s.paused)return;
@@ -64,6 +65,11 @@ export class EconomyPlanner {
       return issue(near(s,target)?act:walk(s,target),why,speech);
     };
     const seedCount=e.bag.filter(x=>x.category===-74).reduce((n,x)=>n+x.count,0);
+    const validPlan=farmPlan?.saveId===s.saveId&&
+      farmPlan.dayKey===s.season+":"+s.day?farmPlan:undefined;
+    const desiredSeeds=validPlan?
+      Math.max(0,validPlan.targetPlots-s.crops.length):strategy.seedReserve;
+    const needSeeds=seedCount<desiredSeeds;
     // Keep edible supplies for stamina recovery. Shipping is all-or-nothing per stack,
     // so selling any food here could remove the last emergency meal.
     const foodIds=new Set(s.food?.map(f=>f.id)??[]);
@@ -106,7 +112,7 @@ export class EconomyPlanner {
       }
       // Do not leave crops unwatered to buy seeds; farm-day planner handles crops first.
       const workPending=s.crops.some(c=>!c.watered||c.ready) || (seedCount>0&&s.emptyPlots.length>0);
-      if(!workPending&&seedCount<strategy.seedReserve&&e.gold>=30&&s.time>=830&&s.time<1530&&!this.shopAttempted){
+      if(!workPending&&needSeeds&&e.gold>=30&&s.time>=830&&s.time<1530&&!this.shopAttempted){
         const step=travel("SeedShop","Buy next batch of seeds","去皮埃尔那儿补货！");
         if(step){this.errand="buy";return step;}
       }
@@ -121,17 +127,19 @@ export class EconomyPlanner {
         this.errand=null;
         return travel("Farm","Shop is closed or keeper absent","商店不开门，先回家。");
       }
-      if(seedCount>=strategy.seedReserve || this.shopAttempted || e.gold<30){
+      if(!needSeeds || this.shopAttempted || e.gold<30){
         this.errand=null;
         return travel("Farm","Return with purchased seeds","带着种子回农场！");
       }
-      const stock=[...shop.offers].filter(x=>x.price>0&&x.price<=e.gold&&x.stock!==0).sort((a,b)=>a.price-b.price);
+      const scored=validPlan?bestPurchase(s,validPlan):undefined;
+      const stock=[...shop.offers].filter(x=>x.price>0&&x.price<=e.gold&&x.stock!==0 &&
+          (!validPlan || x.id===scored?.id)).sort((a,b)=>a.price-b.price);
       // Spend at most half of current cash on one buying batch; preserve emergency funds.
       const offer=stock[0];
       if(offer){
         const spendFraction=strategy.goal==="expand"?0.75:strategy.goal==="save"?0.25:0.5;
         const max=Math.max(1,Math.floor((e.gold*spendFraction)/offer.price));
-        const count=Math.min(strategy.seedReserve-seedCount,max,offer.stock<0?99:offer.stock,12);
+        const count=Math.min(desiredSeeds-seedCount,max,offer.stock<0?99:offer.stock,12);
         if(count>0){
           const a=interact(shop.keeper,{type:"buy_seed",itemId:offer.id,count},"Buy valid seasonal shop stock","补充一些种子，继续赚钱！");
           if(a)return a;
