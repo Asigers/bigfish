@@ -75,6 +75,10 @@ export function parseDecision(raw:string):Decision {
       kind:a.kind as "tree"|"stone"|"twig"|"weed"};
   else if(a.type==="equip_tool"&&["hoe","watering_can","axe","pickaxe","scythe"].includes(String(a.tool)))
     action={type:"equip_tool",tool:a.tool as "hoe"|"watering_can"|"axe"|"pickaxe"|"scythe"};
+  else if(a.type==="craft_chest")action={type:"craft_chest"};
+  else if(a.type==="place_chest"&&Number.isInteger(a.x)&&Number.isInteger(a.y)&&
+    a.x>=0&&a.y>=0&&a.x<150&&a.y<150)
+    action={type:"place_chest",x:a.x,y:a.y};
   else if(a.type==="sleep")action={type:"sleep"};
   else throw Error("Unsupported action");
   return {action,speech:typeof d.speech==="string"?d.speech.slice(0,100):"",reason:typeof d.reason==="string"?d.reason.slice(0,120):""};
@@ -171,6 +175,13 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   if(a.type==="wait")return true;
   if(s.paused)return false;
   if(a.type==="sleep")return s.location==="FarmHouse"&&s.bed!==null;
+  if(a.type==="craft_chest")return s.location==="Farm" && s.canCraftChest===true &&
+    s.inventoryFree>0 && (s.chestKits??0)===0 &&
+    Boolean(s.economy?.bag.some(i=>i.id==="(O)388"&&i.count>=50)) &&
+    s.economy?.chests.length===0;
+  if(a.type==="place_chest")return s.location==="Farm" && (s.chestKits??0)>0 &&
+    close(here,a) && s.placementSites?.some(t=>t.x===a.x&&t.y===a.y)===true &&
+    s.economy?.chests.length===0;
   if(a.type==="travel_to")return s.exits.some(e=>e.target===a.target);
   if(a.type==="move_to")return a.x>=0&&a.y>=0&&a.x<150&&a.y<150;
   if(a.type==="equip_tool")return Boolean(s.economy && ({
