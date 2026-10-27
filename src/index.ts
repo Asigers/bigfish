@@ -8,6 +8,7 @@ import { ForagePlanner } from "./forage.ts";
 import { FarmResourcePlanner } from "./resources.ts";
 import { FoodPlanner } from "./food.ts";
 import { DropPlanner } from "./drops.ts";
+import { InfrastructurePlanner } from "./infrastructure.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
@@ -28,6 +29,7 @@ const forager=new ForagePlanner();
 const resourcePlanner=new FarmResourcePlanner();
 const foodPlanner=new FoodPlanner();
 const dropPlanner=new DropPlanner();
+const infrastructure=new InfrastructurePlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
@@ -103,6 +105,7 @@ async function run():Promise<void>{
         resourcePlanner.observe(pending.before,pending.action,failedReceipt);
         foodPlanner.observe(pending.before,pending.action,failedReceipt);
         dropPlanner.observe(pending.before,pending.action,failedReceipt);
+        infrastructure.observe(pending.before,pending.action,failedReceipt);
         await memory.recordFarmResult(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
@@ -120,6 +123,9 @@ async function run():Promise<void>{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         if(pending.action.type==="pickup_drop")
           dropPlanner.observe(pending.before,pending.action,{
+            id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
+        if(pending.action.type==="craft_chest"||pending.action.type==="place_chest")
+          infrastructure.observe(pending.before,pending.action,{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         await memory.recordFarmResult(pending.before,pending.action,{
           id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
@@ -152,7 +158,7 @@ async function run():Promise<void>{
             const outcomes=memory.get()?.saveId===s.saveId?
               memory.get()?.farmOutcomes??[]:[];
             plan=await brain.planStrategy(s,[
-              ...(memory.get()?.entries??[]),
+              ...(memory.get()?.saveId===s.saveId?memory.get()?.entries??[]:[]),
               ...outcomes.slice(-3).map(o=>
                 "Observed farm outcome: "+JSON.stringify(o)),
               ...(memory.get()?.saveId===s.saveId && memory.get()?.workProject?
@@ -212,15 +218,20 @@ async function run():Promise<void>{
       const canBeginForage=!economic && s.location==="Farm" &&
         d.action.type==="travel_to" && d.action.target==="FarmHouse" &&
         s.time<2000 && s.energy>45;
+      // A dependency-complete native chest project takes priority over further
+      // material destruction when ordinary farm and economy work is exhausted.
+      const construction=canBeginForage && !forager.isActive ?
+        infrastructure.propose(s,project,field) : undefined;
+      if(construction){d=construction;forageChosen=true;}
       // Real drop recovery precedes further resource destruction and map touring.
-      const dropDecision=!economic && (canBeginForage||forager.isActive) ?
+      const dropDecision=!economic && !construction && (canBeginForage||forager.isActive) ?
         dropPlanner.propose(s) : undefined;
       if(dropDecision){d=dropDecision;forageChosen=true;}
       // Work on immediate, measured materials before setting out for longer foraging.
-      const resourceDecision=canBeginForage && !forager.isActive && !dropDecision ?
+      const resourceDecision=canBeginForage && !forager.isActive && !dropDecision && !construction ?
         resourcePlanner.propose(s,true,project) : undefined;
       if(resourceDecision){d=resourceDecision;forageChosen=true;}
-      if(!economic && !dropDecision && !resourceDecision && (forager.isActive || canBeginForage)){
+      if(!economic && !construction && !dropDecision && !resourceDecision && (forager.isActive || canBeginForage)){
         const forageDecision=forager.propose(s,canBeginForage);
         if(forageDecision){d=forageDecision;forageChosen=true;}
       }
@@ -273,7 +284,7 @@ async function run():Promise<void>{
         }
       }
       recent.push(result);if(recent.length>8)recent.shift();
-      if(["buy_seed","ship_item","store_item","withdraw_item","sleep","harvest_crop"].includes(action.type))
+      if(["buy_seed","ship_item","store_item","withdraw_item","sleep","harvest_crop","craft_chest","place_chest"].includes(action.type))
         await memory.note(action.type+": "+result.message,result.ok);
       if(!result.ok)await say("哎呀，刚才失败了："+result.message,{type:"wait",seconds:1},goal.notes,false);
       await sleep(result.ok?200:1200);
@@ -298,6 +309,7 @@ async function run():Promise<void>{
         resourcePlanner.observe(s,action,result);
         foodPlanner.observe(s,action,result);
         dropPlanner.observe(s,action,result);
+        infrastructure.observe(s,action,result);
         if(result.id!=="local-failure" && (!result.ok||stateConfirmed))
           await memory.recordFarmResult(s,action,result);
       }
