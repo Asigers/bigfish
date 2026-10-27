@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GameBridge,CommandOutcomeUnknownError } from "../src/bridge.ts";
 import type { GameState } from "../src/types.ts";
 const token="0123456789abcdef0123456789abcdef";
@@ -113,4 +116,42 @@ test("authoritative late failure can be settled without claiming action success"
     bridge.settleUncertain(pending.cmd.id,"failed-result");
     assert.equal(bridge.getUncertain(),undefined);
   }finally{await bridge.stop();}
+});
+
+test("restarted bridge remembers in-flight actions and previously acknowledged results",async()=>{
+  const folder=await mkdtemp(join(tmpdir(),"bigfish-m0-"));
+  const journal=join(folder,"commands.json");
+  const first=new GameBridge(token,0,"127.0.0.1",journal);
+  let id="";
+  try{
+    await first.start();
+    const base="http://127.0.0.1:"+first.listeningPort();
+    assert.equal((await fetch(base+"/state",{method:"POST",headers,body:JSON.stringify(state)})).status,200);
+    const pending=first.send({type:"travel_to",target:"FarmHouse"},10000);
+    const response=await (await fetch(base+"/next",{headers})).json() as {command:{id:string}};
+    id=response.command.id;
+    await first.stop();
+    await assert.rejects(pending,/Bridge stopped/);
+    const second=new GameBridge(token,0,"127.0.0.1",journal);
+    await second.start();
+    try{
+      assert.equal(second.getUncertain()?.cmd.id,id);
+      assert.deepEqual(second.getUncertain()?.before,state);
+      await assert.rejects(second.send({type:"sleep"}),/outcome unknown/);
+      const base2="http://127.0.0.1:"+second.listeningPort();
+      const receipt={id,ok:true,message:"arrived at FarmHouse"};
+      assert.equal((await fetch(base2+"/result",{method:"POST",headers,body:JSON.stringify(receipt)})).status,200);
+      assert.equal(second.getUncertain()?.lateResult?.ok,true);
+      second.settleUncertain(id,"observed");
+      assert.equal(second.getUncertain(),undefined);
+    }finally{await second.stop();}
+    const third=new GameBridge(token,0,"127.0.0.1",journal);
+    await third.start();
+    try{
+      assert.equal(third.getUncertain(),undefined);
+      const b="http://127.0.0.1:"+third.listeningPort();
+      const receipt={id,ok:true,message:"arrived at FarmHouse"};
+      assert.equal((await fetch(b+"/result",{method:"POST",headers,body:JSON.stringify(receipt)})).status,200);
+    }finally{await third.stop();}
+  }finally{await first.stop();await rm(folder,{recursive:true,force:true});}
 });
