@@ -39,9 +39,15 @@ export function gameOrdinal(s:Pick<GameState,"year"|"season"|"day">):number{
   if(season<0||!Number.isInteger(s.day)||s.day<1||s.day>28)throw Error("Unsupported game calendar");
   return ((s.year??1)-1)*112+season*28+s.day-1;
 }
-export function defaultCampaign(s:GameState):CampaignProposal{
+export function defaultCampaign(s:GameState,
+  observed?:{verifiedActions:number;observedFailureRate:number;recordedDays:number}):CampaignProposal{
   const available=s.economy?.gold??0;
   const plots=s.crops.length+s.emptyPlots.length;
+  if(observed&&observed.verifiedActions>=4&&observed.observedFailureRate>=0.3)
+    return {goals:["save_gold","expand_fields"],horizonDays:3,
+      targetPlots:Math.max(1,Math.min(20,plots)),
+      cashFloor:Math.max(100,Math.min(5000,available)),
+      rationale:"Recent verified action failure rate is high; stabilize before expansion"};
   return {
     goals:available>=400?["expand_fields","automate_watering"]:["expand_fields","save_gold"],
     horizonDays:5,targetPlots:Math.max(2,Math.min(12,plots+3)),
