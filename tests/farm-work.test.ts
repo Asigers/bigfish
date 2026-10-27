@@ -54,6 +54,8 @@ test("do not lose farm material progress after travelling to a shop",()=>{
   assert.equal(updateWorkProject({...shop,saveId:"another-save"},first),undefined);
   assert.equal(validWorkProject({...first,tasks:[...first.tasks,first.tasks[0]]}),false);
   assert.equal(validWorkProject({...first,materialTargets:{"(O)388":-1,"(O)390":30,"(O)771":15}}),false);
+  assert.equal(validWorkProject({...first,tasks:first.tasks.map(t=>t.id==="craft_chest"?
+    {...t,status:"done" as const}:t)}),false);
 });
 test("cash reserve is enforced at the shop, not just in the farm plan narrative",()=>{
   const project=updateWorkProject(base)!;
