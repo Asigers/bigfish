@@ -7,6 +7,12 @@ export function actionObserved(action:Action,before:GameState,after:GameState):b
   if(after.saveId!==before.saveId)return false;
   switch(action.type){
     case "travel_to":return after.location===action.target;
+    case "clear_resource":{
+      const beforeNode=before.resources?.find(n=>n.x===action.x&&n.y===action.y&&n.kind===action.kind);
+      const afterNode=after.resources?.find(n=>n.x===action.x&&n.y===action.y&&n.kind===action.kind);
+      return before.location===after.location && beforeNode!==undefined &&
+        after.resources!==undefined && (afterNode===undefined || afterNode.health<beforeNode.health);
+    }
     case "collect_forage":{
       const item=before.forage?.find(f=>f.x===action.x&&f.y===action.y);
       return after.location===before.location && item!==undefined &&
