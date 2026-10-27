@@ -35,7 +35,7 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     SeedShop:[]
   };
   const state:GameState={
-    saveId:"demo-save",location:"Farm",day:1,season:"spring",time:610,energy:options.initialEnergy??200,x:4,y:4,paused:false,
+    saveId:"demo-save",location:"Farm",year:1,day:1,season:"spring",time:610,energy:options.initialEnergy??200,x:4,y:4,paused:false,
     crops:[{x:5,y:4,watered:false,ready:false,seedId:"(O)472"}],emptyPlots:[{x:6,y:5,watered:false}],
     tillable:[{x:6,y:6}],seeds:[{id:"(O)472",count:2}],forage:forageByRoom.Farm,exits:exits.Farm,
     worldLinks:allLinks,bed:null,inventoryFree:10,waterSources:[{x:4,y:6}],economy
@@ -58,6 +58,20 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     state.exits=exits[room]??[];
     state.forage=forageByRoom[room]??[];
     state.resources=room==="Farm"?farmResources:[];
+    state.surveyTiles=room==="Farm"?(()=>{
+      const tiles=[] as NonNullable<GameState["surveyTiles"]>;
+      for(let dx=-7;dx<=7;dx++)for(let dy=-7;dy<=7;dy++){
+        const x=state.x+dx,y=state.y+dy;
+        if(x<0||y<0||x>=18||y>=18)continue;
+        const occupied=farmResources.some(r=>r.x===x&&r.y===y)||
+          savedChests.some(c=>c.x===x&&c.y===y)||
+          state.crops.some(c=>c.x===x&&c.y===y);
+        const water=x===4&&y===6;
+        tiles.push({x,y,walkable:!occupied&&!water,
+          soil:x>=3&&y>=3&&!water,occupied});
+      }
+      return tiles;
+    })():[];
     state.chestKits=craftedChestKits;
     state.canCraftChest=room==="Farm" &&
       economy.bag.some(i=>i.id==="(O)388"&&i.count>=50);
