@@ -17,6 +17,9 @@ import { actionObserved } from "./action-confirmation.ts";
 import { buildFarmPlan } from "./farm-plan.ts";
 import {mergeFarmMap,routeCorridors} from "./farm-map.ts";
 import { updateWorkProject, nextWorkTask } from "./farm-work.ts";
+import {FarmHistory} from "./history.ts";
+import {campaignNeedsRenewal,defaultCampaign,gameOrdinal,
+  reconcileCampaign,nextCampaignTask,campaignComplete} from "./campaign.ts";
 import type { Action, ActionResult, Decision, GameState } from "./types.ts";
 
 const demo=process.argv.includes("--demo");
@@ -34,6 +37,8 @@ const dropPlanner=new DropPlanner();
 const infrastructure=new InfrastructurePlanner();
 const sprinklerPlanner=new SprinklerPlanner();
 const memory=new GoalMemory();
+const history=new FarmHistory();
+let brainSessionSave:string|undefined;
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
 let nextDialogueAt=0;
@@ -94,6 +99,16 @@ async function run():Promise<void>{
       }
       await sleep(300);continue;
     }
+    // The in-memory Pi conversation also belongs to a save: avoid carrying
+    // strategy/context from another player's loaded Stardew farm.
+    if(brain){
+      if(brainSessionSave && brainSessionSave!==s.saveId){
+        brain.stop();await brain.start();
+        recent.length=0;pendingViewerEvents.length=0;
+        console.log("[bigfish] new save, model conversation reset");
+      }
+      brainSessionSave=s.saveId;
+    }
     if(unconfirmed){
       const pending=unconfirmed;
       const uncertain=bridge.getUncertain();
@@ -111,6 +126,7 @@ async function run():Promise<void>{
         infrastructure.observe(pending.before,pending.action,failedReceipt);
         sprinklerPlanner.observe(pending.before,pending.action,failedReceipt);
         await memory.recordFarmResult(pending.before,pending.action,failedReceipt);
+        history.recordVerifiedAction(pending.before,s,pending.action,failedReceipt.id,false);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
         unconfirmed=undefined;
@@ -133,6 +149,8 @@ async function run():Promise<void>{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         await memory.recordFarmResult(pending.before,pending.action,{
           id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
+        history.recordVerifiedAction(pending.before,s,pending.action,
+          pending.commandId??"state-confirmed",true);
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
       }else{
@@ -176,9 +194,13 @@ async function run():Promise<void>{
           catch(error){console.warn("[strategy] fallback",error instanceof Error?error.message:String(error));}
         }
         await memory.startDay(s,plan);
+        const archived=memory.get()?.farmOutcomes?.at(-1);
+        if(archived && archived.dayKey!==s.season+":"+s.day &&
+          gameOrdinal(s)>0)
+          history.recordCompletedDay(s.saveId,gameOrdinal(s)-1,archived);
         await say("新的一天，本鲸的目标是："+plan.notes,{type:"wait",seconds:1},plan.goal);
       }
-      const goal=memory.get()?.strategy??DEFAULT_STRATEGY;
+      let goal=memory.get()?.strategy??DEFAULT_STRATEGY;
       if(s.location==="Farm"&&s.economy){
         const former=memory.get()?.workProject;
         const project=updateWorkProject(s,former);
@@ -195,7 +217,7 @@ async function run():Promise<void>{
           }
         }
       }
-      const project=memory.get()?.workProject;
+      let project=memory.get()?.workProject;
       // Merge only authoritative patches, scoped to the active save. Unobserved
       // cells are never filled with assumptions or reusable foreign-save terrain.
       if(s.location==="Farm" && s.surveyTiles?.length){
@@ -212,6 +234,34 @@ async function run():Promise<void>{
         }
       }
       const farmMap=memory.get()?.farmMap;
+      if(s.location==="Farm" && campaignNeedsRenewal(s,memory.get()?.campaign)){
+        let campaignProposal=defaultCampaign(s);
+        if(brain){
+          try{
+            campaignProposal=await brain.proposeCampaign(s,[
+              "Last 14 days of observed work: "+JSON.stringify(
+                history.metrics(s.saveId,gameOrdinal(s),14)),
+              ...(memory.get()?.farmOutcomes??[]).slice(-3)
+                .map(o=>"Prior farm day: "+JSON.stringify(o))
+            ]);
+          }catch(error){console.warn("[campaign] safe default",
+            error instanceof Error?error.message:String(error));}
+        }
+        const compiled=reconcileCampaign(s,campaignProposal,undefined,
+          memory.get()?.farmPlan,memory.get()?.workProject,memory.get()?.sprinklerProject);
+        await memory.setCampaign(s,compiled);
+        console.log("[campaign] new",JSON.stringify({
+          goals:compiled.proposal.goals,horizonDays:compiled.proposal.horizonDays,
+          targetPlots:compiled.proposal.targetPlots,cashFloor:compiled.proposal.cashFloor}));
+      }
+      const activeCampaign=memory.get()?.campaign;
+      if(activeCampaign?.saveId===s.saveId){
+        const proposal=activeCampaign.proposal;
+        goal={...goal,
+          seedReserve:proposal.goals.includes("expand_fields")?
+            Math.max(goal.seedReserve,proposal.targetPlots):goal.seedReserve,
+          goal:proposal.goals.includes("expand_fields")?"expand":goal.goal};
+      }
       if(s.location==="Farm" && s.cropCatalog?.length &&
         (!memory.get()?.farmPlan ||
           memory.get()?.farmPlan?.dayKey!==s.season+":"+s.day)){
@@ -243,6 +293,23 @@ async function run():Promise<void>{
               verifiedWatered:goal.verifiedWatered??0
             }));
         }
+      }
+      if(s.location==="Farm" && activeCampaign?.saveId===s.saveId){
+        const proposal=activeCampaign.proposal;
+        const bounded=updateWorkProject(s,project,{
+          cashReserve:proposal.cashFloor,
+          collectWood:proposal.goals.includes("build_storage")
+        });
+        if(bounded){await memory.setWorkProject(s,bounded);project=bounded;}
+        const reconciled=reconcileCampaign(s,proposal,activeCampaign,field,
+          project,memory.get()?.sprinklerProject);
+        await memory.setCampaign(s,reconciled);
+        if(JSON.stringify(activeCampaign.tasks)!==JSON.stringify(reconciled.tasks))
+          console.log("[campaign] progress",JSON.stringify({
+            nextTask:nextCampaignTask(reconciled)?.id??"blocked or complete",
+            complete:campaignComplete(reconciled),
+            tasks:reconciled.tasks.map(t=>({id:t.id,status:t.status,current:t.current,required:t.required}))
+          }));
       }
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
@@ -351,12 +418,14 @@ async function run():Promise<void>{
         dropPlanner.observe(s,action,result);
         infrastructure.observe(s,action,result);
         sprinklerPlanner.observe(s,action,result);
-        if(result.id!=="local-failure" && (!result.ok||stateConfirmed))
+        if(result.id!=="local-failure" && (!result.ok||stateConfirmed)){
           await memory.recordFarmResult(s,action,result);
+          history.recordVerifiedAction(s,bridge.getState()??s,action,result.id,result.ok);
+        }
       }
     }
   }
 }
 try{await run();}
 catch(error){console.error("[bigfish] startup failed:",error);process.exitCode=1;}
-finally{stopDemo?.();brain?.stop();await bridge.stop();}
+finally{stopDemo?.();brain?.stop();history.close();await bridge.stop();}
