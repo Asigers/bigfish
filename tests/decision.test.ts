@@ -8,8 +8,44 @@ const base:GameState={
   worldLinks:[{from:"Farm",to:"FarmHouse"},{from:"FarmHouse",to:"Farm"}],
   bed:null,inventoryFree:10
 };
-test("no crops or seeds triggers end-of-day travel, not endless waiting",()=>{
-  assert.deepEqual(new Autopilot().decide(base).action,{type:"travel_to",target:"FarmHouse"});
+test("empty farm starts finite exploration instead of streaming idle waits",()=>{
+  const p=new Autopilot();
+  const farm:GameState={...base,worldLinks:[
+    ...base.worldLinks,
+    {from:"Farm",to:"BusStop"},{from:"BusStop",to:"Town"},
+    {from:"Town",to:"BusStop"},{from:"BusStop",to:"Farm"}
+  ],exits:[...base.exits,{x:8,y:6,target:"BusStop"}]};
+  assert.deepEqual(p.decide(farm).action,{type:"travel_to",target:"BusStop"});
+  const bus:GameState={...farm,location:"BusStop",exits:[
+    {x:3,y:3,target:"Farm"},{x:8,y:5,target:"Town"}
+  ]};
+  assert.deepEqual(p.decide(bus).action,{type:"travel_to",target:"Town"});
+  const town:GameState={...farm,location:"Town",exits:[{x:2,y:5,target:"BusStop"}]};
+  assert.deepEqual(p.decide(town).action,{type:"travel_to",target:"BusStop"});
+  // The itinerary is finite: after visiting the known places, return home.
+  assert.deepEqual(p.decide(bus).action,{type:"travel_to",target:"Farm"});
+  assert.deepEqual(p.decide(farm).action,{type:"travel_to",target:"FarmHouse"});
+  const home:GameState={...farm,location:"FarmHouse",bed:{x:5,y:5},
+    exits:[{x:3,y:11,target:"Farm"}],time:1000};
+  assert.deepEqual(p.decide(home).action,{type:"sleep"});
+});
+test("at home in the morning, farmer returns to work before touring",()=>{
+  const p=new Autopilot();
+  const home:GameState={...base,location:"FarmHouse",bed:{x:5,y:5},
+    exits:[{x:3,y:11,target:"Farm"}],time:1000};
+  assert.deepEqual(p.decide(home).action,{type:"travel_to",target:"Farm"});
+});
+test("late evening or critically low energy still triggers return and sleep",()=>{
+  const late:GameState={...base,time:2300};
+  const tired:GameState={...base,time:1000,energy:10};
+  const home:GameState={...base,location:"FarmHouse",bed:{x:5,y:5},
+    exits:[{x:3,y:11,target:"Farm"}]};
+  for(const state of [late,tired]){
+    const planner=new Autopilot();
+    assert.deepEqual(planner.decide(state).action,{type:"travel_to",target:"FarmHouse"});
+    const atHome={...home,time:state.time,energy:state.energy};
+    assert.deepEqual(planner.decide(atHome).action,{type:"sleep"});
+  }
 });
 test("plant vacant soil; till soil if none available",()=>{
   const p=new Autopilot();

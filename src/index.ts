@@ -101,7 +101,10 @@ async function run():Promise<void>{
           // Valid world action is not enough for money/inventory policy: the deterministic
           // decision also enforces seed budgets and preservation of essential supplies.
           if(!economyTransaction.includes(d.action.type) &&
-              proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
+              proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s) &&
+              // A same-type LLM suggestion must not replace a planned itinerary hop.
+              (d.action.type!=="travel_to" ||
+                (proposed.action.type==="travel_to"&&proposed.action.target===d.action.target)))
             d=proposed;
           else if(proposed.speech) d={...d,speech:proposed.speech};
         }catch(error){console.warn("[brain] using safe plan:",error instanceof Error?error.message:String(error));}
@@ -121,7 +124,7 @@ async function run():Promise<void>{
         await sleep(1300);continue;
       }
       action=d.action;
-      console.log("[bigfish]",JSON.stringify({day:s.day,location:s.location,goal:goal.goal,action,reason:d.reason}));
+      console.log("[bigfish]",JSON.stringify({day:s.day,time:s.time,energy:Math.round(s.energy),location:s.location,goal:goal.goal,action,reason:d.reason}));
       await say(d.speech,action,goal.notes);
       if(action.type==="wait"){await sleep(action.seconds*1000);continue;}
       const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:15000;

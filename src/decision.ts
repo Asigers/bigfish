@@ -73,19 +73,24 @@ export class Autopilot {
   private failures=new Map<string,number>();
   private prevDay="";
   private lastPosition="";
-  private endingDay=false;
+  private touring=false;
+  private tourDone=false;
+  private visitedLocations=new Set<string>();
   private syncDay(s:GameState):void {
     const dayKey=s.saveId+":"+s.season+":"+s.day;
     const position=s.location+":"+s.x+":"+s.y;
     if(this.prevDay!==dayKey){
       this.failures.clear();
-      this.endingDay=false;
+      this.touring=false;
+      this.tourDone=false;
+      this.visitedLocations.clear();
       this.prevDay=dayKey;
     }else if(this.lastPosition && this.lastPosition!==position){
       // A manual reposition or recovered warp is a meaningful change in route feasibility.
       this.failures.clear();
     }
     this.lastPosition=position;
+    this.visitedLocations.add(s.location);
   }
   observe(s:GameState,recent:ActionResult[],action?:Action):void {
     this.syncDay(s);
@@ -99,26 +104,45 @@ export class Autopilot {
     if(s.paused)return wait("Game menu or cutscene active");
     const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
     const mustSleep=s.time>=2250||s.energy<=12;
-    if(s.location==="FarmHouse" && (this.endingDay||mustSleep) && s.bed){
+    if(s.location==="FarmHouse" && (mustSleep || this.tourDone) && s.bed){
       const action:Action={type:"sleep"};
-      return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
+      return can(action)?decision(action,this.tourDone&&!mustSleep?"Day completed; advance crops":s.energy<=12?"Rest: critically low energy":"End game day: late evening","今天的行程完成啦，休息！"):wait("Sleep repeatedly failed; manual help required");
     }
-    if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16){
+    if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16 && !this.tourDone){
       const action:Action={type:"travel_to",target:"Farm"};
       return can(action)?decision(action,"Return to farming","下地干活啦。"):wait("Farm commute repeatedly failed");
     }
     const goHome=():Decision=>{
-      this.endingDay=true;
       if(s.location==="FarmHouse"&&s.bed){
         const action:Action={type:"sleep"};
-        return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
+        return can(action)?decision(action,s.energy<=12?"Rest: critically low energy":"End game day: late evening","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
       }
       const hop=nextHop(s,"FarmHouse");
       if(!hop)return wait("No home route");
       const action:Action={type:"travel_to",target:hop};
       return can(action)?decision(action,"Return home","天晚了，要回家。"):wait("Travel repeatedly failed; manual help required");
     };
+    const tourNext=():Decision|undefined=>{
+      // Fixed, finite itinerary: no meaningless bouncing across two adjacent maps.
+      // Select only reachable, direct next hops from the actual SMAPI exit snapshot.
+      const destinations=["Town","Forest","Beach","Mountain","BusStop","Backwoods"];
+      for(const destination of destinations){
+        if(this.visitedLocations.has(destination))continue;
+        const hop=nextHop(s,destination);
+        if(!hop||!s.exits.some(e=>e.target===hop))continue;
+        const action:Action={type:"travel_to",target:hop};
+        if(can(action))return decision(action,"Visit "+destination+" on the daily exploration route","农活忙完了，出去逛逛。");
+      }
+      return undefined;
+    };
     if(mustSleep)return goHome();
+    if(this.touring){
+      const step=tourNext();
+      if(step)return step;
+      this.touring=false;
+      this.tourDone=true;
+      return goHome();
+    }
     if(s.location!=="Farm"){
       const hop=nextHop(s,"Farm");
       if(!hop)return wait("Farm is unreachable");
@@ -150,6 +174,16 @@ export class Autopilot {
         if(till)return till;
       }
     }
+    // A livestream must not spend the day idling in one tile. The economy planner
+    // has already had a chance to replenish seeds; tour accessible maps next.
+    if(!this.tourDone && s.time<2000 && s.energy>35){
+      const step=tourNext();
+      if(step){this.touring=true;return step;}
+    }
+    // No supported productive or touring actions remain. Advance crop growth
+    // instead of burning real streaming time on repeated no-op waits.
+    this.touring=false;
+    this.tourDone=true;
     return goHome();
   }
 }

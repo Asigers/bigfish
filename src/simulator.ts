@@ -27,6 +27,10 @@ export function startSimulator(port:number,token:string):()=>void{
   const seen=new Set<string>();
   const url="http://127.0.0.1:"+port,headers={"content-type":"application/json","x-bigfish-token":token};
   let busy=false,shippingIncome=0;
+  function advanceTime(minutes:number):void {
+    const absolute=Math.floor(state.time/100)*60+state.time%100+minutes;
+    state.time=Math.min(2300,Math.floor(absolute/60)*100+absolute%60);
+  }
   function sync():void {
     state.seeds=economy.bag.filter(i=>i.category===-74).map(i=>({id:i.id,count:i.count}));
     state.inventoryFree=Math.max(0,10-economy.bag.length);
@@ -56,7 +60,12 @@ export function startSimulator(port:number,token:string):()=>void{
       await fetch(url+"/state",{method:"POST",headers,body:JSON.stringify(state)});
       const response=await fetch(url+"/next",{headers});
       const {command:c}=await response.json() as {command:Command|null};
-      if(!c||seen.has(c.id))return;
+      if(!c||seen.has(c.id)){
+        // The simulated world needs a clock even when the player is idle.
+        // Accelerate idle ticks for fast integration tests; real game time is SMAPI-owned.
+        advanceTime(30);
+        return;
+      }
       seen.add(c.id);
       let ok=true;
       if(c.saveId!==state.saveId||c.day!==state.day||c.location!==state.location)ok=false;
@@ -126,7 +135,7 @@ export function startSimulator(port:number,token:string):()=>void{
         }
         else ok=false;
       } else ok=false;
-      if(state.location==="Farm")state.time=Math.min(state.time+10,2300);
+      if(state.location==="Farm")advanceTime(10);
       // Commit the resulting snapshot BEFORE acknowledging result to the controller.
       sync();
       await fetch(url+"/state",{method:"POST",headers,body:JSON.stringify(state)});
