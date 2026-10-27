@@ -1,12 +1,12 @@
 import type { Action, ActionResult, Decision, GameState, ResourceKind, ResourceNode, Tile } from "./types.ts";
 import { actionKey } from "./types.ts";
-import type { FarmWorkProject } from "./farm-work.ts";
+import type { FarmWorkProject,MaterialId } from "./farm-work.ts";
 import { readyMaterialTargets } from "./farm-work.ts";
 
 const resourceTool:Record<ResourceKind,"axe"|"pickaxe"|"scythe">={
   tree:"axe",stone:"pickaxe",twig:"axe",weed:"scythe"
 };
-const resourceItem:Record<ResourceKind,string>={
+const resourceItem:Record<ResourceKind,MaterialId>={
   tree:"(O)388",twig:"(O)388",stone:"(O)390",weed:"(O)771"
 };
 const goalCount:Record<ResourceKind,number>={
