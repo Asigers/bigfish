@@ -71,7 +71,9 @@ export class GoalMemory{
     const newKey=s.season+":"+s.day;
     const completedDays=[...(old?.farmOutcomes??[])];
     if(old?.dailyProgress && old.dayKey!==newKey)
-      completedDays.push(old.dailyProgress);
+      completedDays.push({...old.dailyProgress,
+        // Shipping income is settled by the game the next morning.
+        closingGold:s.economy?.gold??old.dailyProgress.closingGold});
     this.journal={
       saveId:s.saveId,dayKey:newKey,
       strategy:strategy??old?.strategy??DEFAULT_STRATEGY,
