@@ -1,5 +1,5 @@
 export type Tile = { x: number; y: number };
-export type CropTile = Tile & { watered: boolean; ready: boolean; seedId?:string };
+export type CropTile = Tile & { watered: boolean; ready: boolean; seedId?:string|null };
 export type PlotTile = Tile & { watered: boolean };
 export type BagItem = { id: string; count: number; category: number; sellable: boolean };
 export type ChestSnapshot = Tile & { items: BagItem[] };
@@ -89,7 +89,7 @@ export function validState(input: unknown): input is GameState {
     && ["day","time","energy","x","y","inventoryFree"].every(k => Number.isFinite(s[k as keyof GameState]))
     && coordinate({x:s.x,y:s.y}) && Number(s.day) > 0 && Number(s.day) <= 28
     && Array.isArray(s.crops) && s.crops.length <= 250 && s.crops.every(c=>coordinate(c)&&typeof c.watered==="boolean"&&typeof c.ready==="boolean"&&
-      (c.seedId===undefined || (typeof c.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.seedId))))
+      ((c.seedId===undefined||c.seedId===null) || (typeof c.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.seedId))))
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
@@ -136,7 +136,7 @@ export function stateValidationIssues(input: unknown): string[] {
   };
   checkArray("crops", 250, v => coordinate(v) && typeof (v as CropTile).watered === "boolean" &&
     typeof (v as CropTile).ready === "boolean" &&
-    ((v as CropTile).seedId===undefined ||
+    (((v as CropTile).seedId===undefined||(v as CropTile).seedId===null) ||
       (typeof (v as CropTile).seedId==="string" &&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as CropTile).seedId!))));
   if(s.cropCatalog!==undefined)checkArray("cropCatalog",150,validCropInfo);
