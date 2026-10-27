@@ -4,6 +4,7 @@ import { GameBridge, CommandOutcomeUnknownError } from "./bridge.ts";
 import { Autopilot, validateAgainstWorld } from "./decision.ts";
 import { PiBrain } from "./brain.ts";
 import { EconomyPlanner, DEFAULT_STRATEGY } from "./economy.ts";
+import { ForagePlanner } from "./forage.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
@@ -18,6 +19,7 @@ const bridge=new GameBridge(token,port,"127.0.0.1",demo?undefined:join(process.c
 const brain=mock?undefined:new PiBrain();
 const planner=new Autopilot();
 const economy=new EconomyPlanner();
+const forager=new ForagePlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
@@ -84,6 +86,7 @@ async function run():Promise<void>{
         bridge.settleUncertain(pending.commandId,"failed-result");
         planner.observe(pending.before,[failedReceipt],pending.action);
         economy.update(pending.before,pending.action,false);
+        forager.observe(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
         unconfirmed=undefined;
@@ -124,7 +127,18 @@ async function run():Promise<void>{
       const goal=memory.get()?.strategy??DEFAULT_STRATEGY;
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
-      let d:Decision=economy.propose(s,goal)??planner.decide(s);
+      const economic=economy.propose(s,goal);
+      let d:Decision=economic??planner.decide(s);
+      let forageChosen=false;
+      // Productive gathering begins only after farming and financial errands have
+      // no action; once started, the trip continues across maps until bounded.
+      const canBeginForage=!economic && s.location==="Farm" &&
+        d.action.type==="travel_to" && d.action.target==="FarmHouse" &&
+        s.time<2000 && s.energy>45;
+      if(!economic && (forager.isActive || canBeginForage)){
+        const forageDecision=forager.propose(s,canBeginForage);
+        if(forageDecision){d=forageDecision;forageChosen=true;}
+      }
       const toolAction=requiredTool(s,d.action);
       if(toolAction)d={action:toolAction,reason:"Prepare correct real game tool",speech:"先拿好工具。"};
       if(brain && (Date.now()>=nextDialogueAt || d.action.type==="sleep" || d.action.type==="buy_seed")){
@@ -135,7 +149,7 @@ async function run():Promise<void>{
           const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can"];
           // Valid world action is not enough for money/inventory policy: the deterministic
           // decision also enforces seed budgets and preservation of essential supplies.
-          if(!economyTransaction.includes(d.action.type) &&
+          if(!forageChosen && !economyTransaction.includes(d.action.type) &&
               proposed.action.type===d.action.type&&validateAgainstWorld(proposed.action,s))
             d=proposed;
           else if(proposed.speech) d={...d,speech:proposed.speech};
@@ -197,6 +211,7 @@ async function run():Promise<void>{
       if(result&&action){
         planner.observe(s,[result],action);
         economy.update(s,action,result.ok);
+        forager.observe(s,action,result);
       }
     }
   }

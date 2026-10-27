@@ -223,6 +223,17 @@ public sealed class ModEntry : Mod
                 tillable.Add(new { x, y });
             }
         }
+        // Only spawned forage objects are collectible. Never infer rocks, machines, or
+        // player-placed objects to be pickups just because they share an object type.
+        var forage = loc.objects.Pairs
+            .Where(pair => pair.Value is SObject obj && obj.IsSpawnedObject &&
+                !obj.bigCraftable.Value && obj.QualifiedItemId.StartsWith("(O)") &&
+                pair.Key.X >= 0 && pair.Key.Y >= 0 &&
+                pair.Key.X < 256 && pair.Key.Y < 256)
+            .Take(80)
+            .Select(pair => new { x = (int)pair.Key.X, y = (int)pair.Key.Y,
+                itemId = pair.Value.QualifiedItemId })
+            .ToArray();
         var seeds = player.Items.Where(i => i != null && i.Category == -74 && i.QualifiedItemId.StartsWith("(O)"))
             .GroupBy(i => i!.QualifiedItemId)
             .Take(60)
@@ -297,7 +308,7 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, exits, worldLinks = links, waterSources,
+            crops, emptyPlots, tillable, seeds, forage, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
@@ -354,6 +365,35 @@ public sealed class ModEntry : Mod
                 }
                 active = cmd;
                 BeginMovement(new Point(cmd.X, cmd.Y));
+                return;
+            }
+            if (cmd.Type == "collect_forage")
+            {
+                if (cmd.X < 0 || cmd.Y < 0 || cmd.X >= 256 || cmd.Y >= 256)
+                { Finish(cmd, false, "invalid forage tile"); return; }
+                if (!Near(player.TilePoint, cmd.X, cmd.Y))
+                { Finish(cmd, false, "approach forage tile first"); return; }
+                var position = new Vector2(cmd.X, cmd.Y);
+                if (!loc.objects.TryGetValue(position, out var forageObject) ||
+                    forageObject is not SObject spawned || !spawned.IsSpawnedObject ||
+                    spawned.bigCraftable.Value || !spawned.QualifiedItemId.StartsWith("(O)"))
+                { Finish(cmd, false, "no collectible forage at tile"); return; }
+                if (!player.couldInventoryAcceptThisItem(spawned))
+                { Finish(cmd, false, "backpack cannot hold forage"); return; }
+                // Trigger native interaction logic; never inject an inventory item.
+                // Require BOTH ground object removal and a measured bag increment.
+                var beforeCount = player.Items
+                    .Where(item => item?.QualifiedItemId == spawned.QualifiedItemId)
+                    .Sum(item => item!.Stack);
+                loc.checkAction(new xTile.Dimensions.Location(cmd.X, cmd.Y), Game1.viewport, player);
+                var afterCount = player.Items
+                    .Where(item => item?.QualifiedItemId == spawned.QualifiedItemId)
+                    .Sum(item => item!.Stack);
+                var removed = !loc.objects.TryGetValue(position, out var remaining) ||
+                    remaining != forageObject;
+                var collected = removed && afterCount > beforeCount;
+                Finish(cmd, collected, collected ? "forage collected" :
+                    "native pickup lacked object removal or inventory increase");
                 return;
             }
             if (cmd.Type == "equip_tool")

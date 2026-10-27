@@ -10,6 +10,7 @@ export type EconomyState = {
   tools: { hoe: boolean; wateringCan: boolean; equipped: string; waterLeft: number };
 };
 export type SeedStack = { id: string; count: number };
+export type ForageItem = Tile & { itemId: string };
 export type Exit = Tile & { target: string };
 export type WorldLink = { from: string; to: string };
 export type GameState = {
@@ -17,7 +18,7 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; forage?: ForageItem[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -29,7 +30,7 @@ export type Action =
   | { type: "buy_seed"; itemId: string; count: number }
   | { type: "store_item" | "withdraw_item"; x: number; y: number; itemId: string; count: number }
   | { type: "equip_tool"; tool: "hoe" | "watering_can" }
-  | { type: "refill_watering_can"; x: number; y: number }
+  | { type: "refill_watering_can" | "collect_forage"; x: number; y: number }
   | { type: "sleep" }
   | { type: "wait"; seconds: number };
 export type Command = Exclude<Action, { type: "wait" }> & { id: string; saveId: string; day: number; location: string };
@@ -67,6 +68,9 @@ export function validState(input: unknown): input is GameState {
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
+    && (s.forage === undefined || (Array.isArray(s.forage) && s.forage.length <= 80 &&
+      s.forage.every(f=>coordinate(f)&&typeof f.itemId==="string"&&
+        /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(f.itemId))))
     && Array.isArray(s.exits) && s.exits.length <= 50 && s.exits.every(validExit)
     && Array.isArray(s.worldLinks) && s.worldLinks.length <= 300 && s.worldLinks.every(c=>record(c)&&locName(c.from)&&locName(c.to))
     && (s.bed === null || coordinate(s.bed))
@@ -98,6 +102,10 @@ export function stateValidationIssues(input: unknown): string[] {
   checkArray("tillable", 250, coordinate);
   checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
     /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.id) && Number.isInteger(v.count) && Number(v.count) > 0);
+  if(s.forage !== undefined)
+    checkArray("forage", 80, v => coordinate(v) && record(v) &&
+      typeof (v as ForageItem).itemId === "string" &&
+      /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as ForageItem).itemId));
   checkArray("exits", 50, validExit);
   checkArray("worldLinks", 300, v => record(v) && locName(v.from) && locName(v.to));
   if (s.bed !== null && !coordinate(s.bed)) issues.push("bed");
