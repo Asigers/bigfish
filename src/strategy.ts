@@ -4,10 +4,11 @@ import type { Action, ActionResult, GameState } from "./types.ts";
 import type { FarmPlan, FarmDayOutcome } from "./farm-plan.ts";
 import {validWorkProject,type FarmWorkProject} from "./farm-work.ts";
 import {validFarmMap,type FarmMap} from "./farm-map.ts";
+import {validSprinklerProject,type SprinklerProject} from "./sprinklers.ts";
 import { DEFAULT_STRATEGY, type Strategy } from "./economy.ts";
 export type Journal = { saveId:string; dayKey:string; strategy:Strategy; entries:string[]; completed:string[];
   farmPlan?:FarmPlan; farmOutcomes?:FarmDayOutcome[]; dailyProgress?:FarmDayOutcome;
-  workProject?:FarmWorkProject; farmMap?:FarmMap };
+  workProject?:FarmWorkProject; farmMap?:FarmMap; sprinklerProject?:SprinklerProject };
 const path=join(process.cwd(),"data","bigfish-memory.json");
 function validStrategy(x:unknown):x is Strategy{
   if(!x||typeof x!=="object")return false;
@@ -36,6 +37,8 @@ export class GoalMemory{
           this.journal={...x,entries:x.entries.filter(e=>typeof e==="string").slice(-40),
             completed:x.completed.filter(e=>typeof e==="string").slice(-30),
             farmPlan:this.validPlan(x.farmPlan,x.saveId,x.dayKey)?x.farmPlan:undefined,
+            sprinklerProject:validSprinklerProject(x.sprinklerProject)&&
+              x.sprinklerProject.saveId===x.saveId?x.sprinklerProject:undefined,
             farmMap:validFarmMap(x.farmMap)&&x.farmMap.saveId===x.saveId?
               x.farmMap:undefined,
             workProject:validWorkProject(x.workProject)&&x.workProject.saveId===x.saveId?
@@ -101,6 +104,7 @@ export class GoalMemory{
       farmOutcomes:completedDays.slice(-14),
       farmPlan:old?.dayKey===newKey?old.farmPlan:undefined,
       farmMap:old?.farmMap,
+      sprinklerProject:old?.sprinklerProject,
       workProject:old?.workProject,
       dailyProgress:old?.dayKey===newKey?old.dailyProgress:undefined
     };
@@ -111,6 +115,14 @@ export class GoalMemory{
       !validWorkProject(project))throw Error("Invalid or cross-save farm project");
     if(JSON.stringify(this.journal.workProject)===JSON.stringify(project))return;
     this.journal.workProject=project;
+    await this.persist();
+  }
+  async setSprinklerProject(s:GameState,p:SprinklerProject):Promise<void>{
+    if(!this.journal||this.journal.saveId!==s.saveId||
+      p.saveId!==s.saveId||!validSprinklerProject(p))
+      throw Error("Invalid or cross-save sprinkler project");
+    if(JSON.stringify(this.journal.sprinklerProject)===JSON.stringify(p))return;
+    this.journal.sprinklerProject=p;
     await this.persist();
   }
   async setFarmMap(s:GameState,map:FarmMap):Promise<void>{
