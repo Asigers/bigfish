@@ -191,6 +191,7 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   if(a.type==="clear_resource")return s.location==="Farm" && s.energy>=65 &&
     s.inventoryFree>0 && close(here,a) &&
     Boolean(s.resources?.some(n=>n.x===a.x&&n.y===a.y&&n.kind===a.kind));
+  if(!("x" in a && "y" in a))return false;
   if(s.location!=="Farm"||!close(here,a))return false;
   if(a.type==="water_tile")return s.crops.some(c=>c.x===a.x&&c.y===a.y&&!c.watered);
   if(a.type==="harvest_crop")return s.inventoryFree>0&&s.crops.some(c=>c.x===a.x&&c.y===a.y&&c.ready);
