@@ -32,7 +32,7 @@ export type Action =
   | { type: "ship_item"; itemId: string }
   | { type: "buy_seed"; itemId: string; count: number }
   | { type: "store_item" | "withdraw_item"; x: number; y: number; itemId: string; count: number }
-  | { type: "equip_tool"; tool: "hoe" | "watering_can" }
+  | { type: "equip_tool"; tool: "hoe" | "watering_can" | "axe" | "pickaxe" | "scythe" }
   | { type: "refill_watering_can" | "collect_forage"; x: number; y: number }
   | { type:"clear_resource"; x:number; y:number; kind:ResourceKind }
   | { type: "sleep" }
