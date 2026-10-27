@@ -102,6 +102,10 @@ async function run():Promise<void>{
         actionObserved(pending.action,pending.before,s)){
         if(pending.commandId && uncertain?.cmd.id===pending.commandId)
           bridge.settleUncertain(pending.commandId,"observed");
+        // A command whose result was lost still consumed the day's action budget.
+        if(pending.action.type==="clear_resource")
+          resourcePlanner.observe(pending.before,pending.action,{
+            id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
       }else{
