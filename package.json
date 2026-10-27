@@ -10,6 +10,7 @@
     "demo": "node --experimental-strip-types src/index.ts --demo",
     "start": "node --experimental-strip-types src/index.ts",
     "typecheck": "tsc --noEmit",
+    "m2:report": "node --experimental-strip-types src/m2-report.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "live2d:install": "node scripts/install-live2d.mjs"
   },
