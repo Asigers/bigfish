@@ -113,7 +113,8 @@ export class EconomyPlanner {
       }
       // Do not leave crops unwatered to buy seeds; farm-day planner handles crops first.
       const workPending=s.crops.some(c=>!c.watered||c.ready) || (seedCount>0&&s.emptyPlots.length>0);
-      if(!workPending&&needSeeds&&e.gold>=30&&s.time>=830&&s.time<1530&&!this.shopAttempted){
+      if(!workPending&&needSeeds&&(!validPlan||validPlan.crops.length>0)&&
+        e.gold>=30&&s.time>=830&&s.time<1530&&!this.shopAttempted){
         const step=travel("SeedShop","Buy next batch of seeds","去皮埃尔那儿补货！");
         if(step){this.errand="buy";return step;}
       }
