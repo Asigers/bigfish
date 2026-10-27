@@ -82,14 +82,14 @@ test("7 simulated Stardew days retain one multi-day campaign, save separate evid
         await memory.setCampaign(current,goal);
       }
     }
-    assert.equal(history.metrics("demo-save",7,7).recordedDays,7);
-    const final=history.metrics("demo-save",7,7);
+    assert.equal(history.metrics("demo-save",6,7).recordedDays,7);
+    const final=history.metrics("demo-save",6,7);
     assert.equal(final.failed,0);
     assert.ok(final.verifiedActions>=1);
     assert.ok(goal.startedOrdinal>=begin);
     history.close();history=undefined;
     const another=new FarmHistory(join(dir,"history.sqlite"));
-    assert.equal(another.metrics("demo-save",7,7).recordedDays,7);
+    assert.equal(another.metrics("demo-save",6,7).recordedDays,7);
     assert.equal(another.metrics("different-save",7,7).recordedDays,0);
     another.close();
   }finally{
