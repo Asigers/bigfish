@@ -23,7 +23,7 @@ export type SurveyTile = Tile & { walkable:boolean; soil:boolean; occupied:boole
 export type Exit = Tile & { target: string };
 export type WorldLink = { from: string; to: string };
 export type GameState = {
-  saveId: string; location: string; day: number; season: string; time: number;
+  saveId: string; location: string; year?:number; day: number; season: string; time: number;
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
@@ -90,6 +90,7 @@ export function validState(input: unknown): input is GameState {
     && locName(s.location) && typeof s.season === "string" && typeof s.paused === "boolean"
     && (s.pauseReason === undefined || ["none","menu","event","time_stopped"].includes(s.pauseReason))
     && ["day","time","energy","x","y","inventoryFree"].every(k => Number.isFinite(s[k as keyof GameState]))
+    && (s.year===undefined||(Number.isInteger(s.year)&&s.year>=1&&s.year<=1000))
     && coordinate({x:s.x,y:s.y}) && Number(s.day) > 0 && Number(s.day) <= 28
     && Array.isArray(s.crops) && s.crops.length <= 250 && s.crops.every(c=>coordinate(c)&&typeof c.watered==="boolean"&&typeof c.ready==="boolean"&&
       ((c.seedId===undefined||c.seedId===null) || (typeof c.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.seedId))))
@@ -139,6 +140,7 @@ export function stateValidationIssues(input: unknown): string[] {
   for (const k of numberFields) if (!Number.isFinite(s[k])) issues.push(k);
   if (!coordinate({x: s.x, y: s.y})) issues.push("player coordinates");
   if (typeof s.day !== "number" || s.day <= 0 || s.day > 28) issues.push("day range");
+  if (s.year!==undefined && (!Number.isInteger(s.year)||Number(s.year)<1||Number(s.year)>1000))issues.push("year");
   const checkArray = (key: string, max: number, validate: (v: unknown) => boolean) => {
     const values = s[key];
     if (!Array.isArray(values) || values.length > max) { issues.push(key + " array/length"); return; }
