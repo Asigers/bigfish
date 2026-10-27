@@ -154,7 +154,13 @@ async function run():Promise<void>{
             plan=await brain.planStrategy(s,[
               ...(memory.get()?.entries??[]),
               ...outcomes.slice(-3).map(o=>
-                "Observed farm outcome: "+JSON.stringify(o))
+                "Observed farm outcome: "+JSON.stringify(o)),
+              ...(memory.get()?.saveId===s.saveId && memory.get()?.workProject?
+                ["Observed unfinished farm tasks: "+JSON.stringify(
+                  memory.get()!.workProject!.tasks.map(t=>({
+                    id:t.id,status:t.status,progress:t.progress,required:t.required,
+                    dependsOn:t.dependsOn
+                  })))] : [])
             ]);
           }
           catch(error){console.warn("[strategy] fallback",error instanceof Error?error.message:String(error));}
