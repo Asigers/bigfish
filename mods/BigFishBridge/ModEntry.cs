@@ -30,6 +30,7 @@ public sealed class RemoteCommand
     public string SeedId { get; set; } = "";
     public string ItemId { get; set; } = "";
     public string Tool { get; set; } = "";
+    public string Kind { get; set; } = "";
     public int Count { get; set; } = 1;
     public int Day { get; set; }
     public int X { get; set; }
@@ -473,7 +474,7 @@ public sealed class ModEntry : Mod
                     !Near(player.TilePoint, cmd.X, cmd.Y))
                 { Finish(cmd, false, "unsafe resource action: farm, energy or proximity"); return; }
                 var resourceTile = new Vector2(cmd.X, cmd.Y);
-                if (cmd.Target == "tree")
+                if (cmd.Kind == "tree")
                 {
                     if (!loc.terrainFeatures.TryGetValue(resourceTile, out var feature) ||
                         feature is not Tree tree || !SafeResourceTree(tree) ||
@@ -488,14 +489,14 @@ public sealed class ModEntry : Mod
                     return;
                 }
                 if (!loc.objects.TryGetValue(resourceTile, out var item) ||
-                    item is not SObject debris || DebrisKind(debris) != cmd.Target)
+                    item is not SObject debris || DebrisKind(debris) != cmd.Kind)
                 { Finish(cmd, false, "resource not present or kind changed"); return; }
-                if (cmd.Target == "weed" &&
+                if (cmd.Kind == "weed" &&
                     loc.terrainFeatures.Pairs.Any(p => p.Value is HoeDirt dirt &&
                         dirt.crop != null && Math.Abs(p.Key.X - cmd.X) <= 2 &&
                         Math.Abs(p.Key.Y - cmd.Y) <= 2))
                 { Finish(cmd, false, "weed too close to planted crops"); return; }
-                var requiredTool = cmd.Target switch
+                var requiredTool = cmd.Kind switch
                 {
                     "stone" => player.CurrentTool is Pickaxe,
                     "twig" => player.CurrentTool is Axe,
