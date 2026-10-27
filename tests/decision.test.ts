@@ -8,8 +8,25 @@ const base:GameState={
   worldLinks:[{from:"Farm",to:"FarmHouse"},{from:"FarmHouse",to:"Farm"}],
   bed:null,inventoryFree:10
 };
-test("no crops or seeds triggers end-of-day travel, not endless waiting",()=>{
-  assert.deepEqual(new Autopilot().decide(base).action,{type:"travel_to",target:"FarmHouse"});
+test("empty farm during morning does not cause an early bedtime",()=>{
+  const p=new Autopilot();
+  assert.deepEqual(p.decide(base).action,{type:"wait",seconds:15});
+  const home:GameState={...base,location:"FarmHouse",bed:{x:5,y:5},
+    exits:[{x:3,y:11,target:"Farm"}],time:1000};
+  // Even after returning home, the same-day morning should not latch a sleep decision.
+  assert.deepEqual(p.decide(home).action,{type:"travel_to",target:"Farm"});
+});
+test("late evening or critically low energy still triggers return and sleep",()=>{
+  const late:GameState={...base,time:2300};
+  const tired:GameState={...base,time:1000,energy:10};
+  const home:GameState={...base,location:"FarmHouse",bed:{x:5,y:5},
+    exits:[{x:3,y:11,target:"Farm"}]};
+  for(const state of [late,tired]){
+    const planner=new Autopilot();
+    assert.deepEqual(planner.decide(state).action,{type:"travel_to",target:"FarmHouse"});
+    const atHome={...home,time:state.time,energy:state.energy};
+    assert.deepEqual(planner.decide(atHome).action,{type:"sleep"});
+  }
 });
 test("plant vacant soil; till soil if none available",()=>{
   const p=new Autopilot();
