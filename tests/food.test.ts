@@ -50,7 +50,7 @@ test("food completion requires BOTH depleted inventory and real energy restorati
 test("reserve emergency edible items, ship actual produce, and store craft resources when nearly full",()=>{
   const planner=new EconomyPlanner();
   const action=planner.propose(base)?.action;
-  assert.equal(action?.type,"wait"===action?.type?"wait":"none"); // no nonfood sellables in inventory
+  assert.equal(action,undefined); // no nonfood produce should be shipped
   const withProduce:GameState={...base,economy:{...base.economy!,bag:[
     ...base.economy!.bag,{id:"(O)24",count:2,category:-75,sellable:true}]}};
   assert.deepEqual(new EconomyPlanner().propose(withProduce)?.action,{type:"ship_item",itemId:"(O)24"});
