@@ -11,7 +11,7 @@ export type CropEstimate={
   estimatedMargin:number|null;
 };
 export type FarmPlan={
-  saveId:string; dayKey:string; targetPlots:number; fieldTiles:Tile[];
+  saveId:string; dayKey:string; targetPlots:number; occupiedPlots:number; fieldTiles:Tile[];
   preferredSeedId:string|null; crops:CropEstimate[];
   reason:string; revision:string; costKnown:boolean;
 };
@@ -96,6 +96,7 @@ export function buildFarmPlan(s:GameState,strategy:Strategy,
   const available=[...new Map(targetTiles.map(t=>[key(t),t])).values()].slice(0,20);
   const estimates=rankedCrops(s);
   return {saveId:s.saveId,dayKey:s.season+":"+s.day,targetPlots:available.length,
+    occupiedPlots:s.crops.length,
     fieldTiles:available,preferredSeedId:chosenCrop(s,estimates),crops:estimates.slice(0,20),
     reason:strategy.goal+" on "+available.length+" observed plots, "+daysLeft(s)+" season days remain",
     revision,costKnown:estimates.some(e=>e.observedSeedPrice!==null)};
