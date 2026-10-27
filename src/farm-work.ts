@@ -38,10 +38,13 @@ export function validWorkProject(input:unknown):input is FarmWorkProject{
     p.materialTargets[id]>=0&&p.materialTargets[id]<=1000))return false;
   const names=["wood","stone","fiber","seed_budget","craft_chest"];
   if(new Set(p.tasks.map(t=>t.id)).size!==5 || !names.every(n=>p.tasks.some(t=>t.id===n)))return false;
+  const chest=p.tasks.find(t=>t.id==="craft_chest");
+  if(chest?.status!=="blocked"||chest.dependsOn.length!==1||
+    chest.dependsOn[0]!=="wood")return false;
   return p.tasks.every(t=>names.includes(t.id)&&["ready","blocked","done"].includes(t.status)&&
     Array.isArray(t.dependsOn)&&t.dependsOn.length<=4 &&
     t.dependsOn.every(d=>names.includes(d)&&d!==t.id)&&
-    Number.isInteger(t.progress)&&t.progress>=0&&t.progress<=1000000 &&
+    Number.isInteger(t.progress)&&t.progress>=0&&t.progress<=1000000000 &&
     Number.isInteger(t.required)&&t.required>=0&&t.required<=1000000 &&
     typeof t.reason==="string"&&t.reason.length<=200);
 }
