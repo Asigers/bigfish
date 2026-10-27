@@ -380,13 +380,20 @@ public sealed class ModEntry : Mod
                 { Finish(cmd, false, "no collectible forage at tile"); return; }
                 if (!player.couldInventoryAcceptThisItem(spawned))
                 { Finish(cmd, false, "backpack cannot hold forage"); return; }
-                // Trigger native interaction logic; do not spawn or inject an inventory item.
-                // The world object must disappear for the command to count as successful.
+                // Trigger native interaction logic; never inject an inventory item.
+                // Require BOTH ground object removal and a measured bag increment.
+                var beforeCount = player.Items
+                    .Where(item => item?.QualifiedItemId == spawned.QualifiedItemId)
+                    .Sum(item => item!.Stack);
                 loc.checkAction(new xTile.Dimensions.Location(cmd.X, cmd.Y), Game1.viewport, player);
-                var collected = !loc.objects.TryGetValue(position, out var remaining) ||
+                var afterCount = player.Items
+                    .Where(item => item?.QualifiedItemId == spawned.QualifiedItemId)
+                    .Sum(item => item!.Stack);
+                var removed = !loc.objects.TryGetValue(position, out var remaining) ||
                     remaining != forageObject;
+                var collected = removed && afterCount > beforeCount;
                 Finish(cmd, collected, collected ? "forage collected" :
-                    "native forage interaction did not collect item");
+                    "native pickup lacked object removal or inventory increase");
                 return;
             }
             if (cmd.Type == "equip_tool")
