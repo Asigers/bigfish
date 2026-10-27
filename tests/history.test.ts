@@ -65,12 +65,19 @@ test("seven separate days are counted once even after replay and controller rest
         closingGold:105+i*10,planted:1,watered:3,harvested:i%2,
         failed:0});
     }
+    assert.equal(h.consecutiveDays("campaign-save",7),true);
+    assert.equal(h.consecutiveDays("campaign-save",8),false);
     const m=h.metrics("campaign-save",7,7);
     assert.equal(m.recordedDays,7);
     assert.equal(m.netGoldChange,35);
     assert.equal(m.harvested,4);
     assert.equal(m.failed,0);
     assert.equal(h.metrics("campaign-save",7,3).recordedDays,3);
+    h.recordCompletedDay("gap",1,{dayKey:"spring:2",targetPlots:1,
+      openingGold:0,closingGold:5,planted:0,watered:0,harvested:0,failed:0});
+    h.recordCompletedDay("gap",3,{dayKey:"spring:4",targetPlots:1,
+      openingGold:5,closingGold:5,planted:0,watered:0,harvested:0,failed:0});
+    assert.equal(h.consecutiveDays("gap",2),false);
     h.close();
   }finally{await rm(dir,{recursive:true,force:true});}
 });
