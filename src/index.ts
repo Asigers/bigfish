@@ -29,6 +29,7 @@ type Unconfirmed={
   lastWarningAt:number;since:number;commandId?:string;
 };
 let unconfirmed:Unconfirmed|undefined;
+let lastDisconnectedWarningAt=0;
 function requiredTool(state:GameState,action:Action):Action|undefined{
   const tools=state.economy?.tools;
   if(!tools)return;
@@ -57,7 +58,14 @@ async function run():Promise<void>{
   process.on("SIGTERM",()=>{stopping=true;});
   while(!stopping){
     const s=bridge.getState();
-    if(!s){await sleep(300);continue;}
+    if(!s){
+      if(Date.now()-lastDisconnectedWarningAt>=15000){
+        lastDisconnectedWarningAt=Date.now();
+        console.warn("[bigfish] no fresh SMAPI snapshot;",
+          "state sync disconnected",unconfirmed?"with unresolved "+unconfirmed.action.type:"");
+      }
+      await sleep(300);continue;
+    }
     if(unconfirmed){
       const pending=unconfirmed;
       const uncertain=bridge.getUncertain();
