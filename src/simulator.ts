@@ -8,16 +8,20 @@ const exits:Record<Room,{x:number;y:number;target:Room}[]>={
   SeedShop:[{x:3,y:11,target:"Town"}]
 };
 const allLinks=Object.entries(exits).flatMap(([from,list])=>list.map(to=>({from,to:to.target})));
-export function startSimulator(port:number,token:string,options:{initialEnergy?:number}={}):()=>void{
+export function startSimulator(port:number,token:string,options:{initialEnergy?:number;initialChests?:number;initialWood?:number}={}):()=>void{
   const economy={
     gold:220,
     bag:[{id:"(O)472",count:2,category:-74,sellable:false}] as BagItem[],
-    chests:[{x:6,y:3,items:[] as BagItem[]}],
+    chests: (options.initialChests===0?[]:[{x:6,y:3,items:[] as BagItem[]}]),
     shippingBin:{x:7,y:4} as Tile|null,
     shop:null as EconomyState["shop"],
     tools:{hoe:true,wateringCan:true,axe:true,pickaxe:true,scythe:true,equipped:"hoe",waterLeft:40}
   };
+  if(options.initialWood) economy.bag.push({
+    id:"(O)388",count:options.initialWood,category:-16,sellable:false});
   const savedChests=economy.chests;
+  let craftedChestKits=0;
+  const sites=[{x:4,y:7},{x:7,y:10},{x:11,y:11}];
   const farmDrops:{x:number;y:number;itemId:string}[]=[];
   const farmResources:ResourceNode[]=[
     {x:7,y:7,kind:"twig",health:1},{x:8,y:7,kind:"stone",health:2},
@@ -54,6 +58,11 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     state.exits=exits[room]??[];
     state.forage=forageByRoom[room]??[];
     state.resources=room==="Farm"?farmResources:[];
+    state.chestKits=craftedChestKits;
+    state.canCraftChest=room==="Farm" &&
+      economy.bag.some(i=>i.id==="(O)388"&&i.count>=50);
+    state.placementSites=room==="Farm"?sites.filter(p=>
+      !savedChests.some(ch=>ch.x===p.x&&ch.y===p.y)):[];
     state.drops=room==="Farm"?farmDrops:[];
     state.bed=room==="FarmHouse"?{x:5,y:5}:null;
     economy.shippingBin=room==="Farm"?{x:7,y:4}:null;
@@ -95,6 +104,20 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
           economy.gold+=shippingIncome;shippingIncome=0;
           state.crops=state.crops.map(c=>({...c,watered:false,ready:true}));
           economy.tools.waterLeft=40;
+        }
+      }
+      else if(c.type==="craft_chest"){
+        if(state.location!=="Farm"||state.inventoryFree<=0||craftedChestKits>0||
+          !remove("(O)388",50))ok=false;
+        else craftedChestKits++;
+      }
+      else if(c.type==="place_chest"){
+        const site=state.placementSites?.some(p=>p.x===c.x&&p.y===c.y);
+        const near=Math.max(Math.abs(state.x-c.x),Math.abs(state.y-c.y))<=1;
+        if(state.location!=="Farm"||!site||!near||craftedChestKits<1)ok=false;
+        else{
+          craftedChestKits--;
+          savedChests.push({x:c.x,y:c.y,items:[]});
         }
       }
       else if(c.type==="collect_forage"){
