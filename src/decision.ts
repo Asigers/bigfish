@@ -73,13 +73,11 @@ export class Autopilot {
   private failures=new Map<string,number>();
   private prevDay="";
   private lastPosition="";
-  private endingDay=false;
   private syncDay(s:GameState):void {
     const dayKey=s.saveId+":"+s.season+":"+s.day;
     const position=s.location+":"+s.x+":"+s.y;
     if(this.prevDay!==dayKey){
       this.failures.clear();
-      this.endingDay=false;
       this.prevDay=dayKey;
     }else if(this.lastPosition && this.lastPosition!==position){
       // A manual reposition or recovered warp is a meaningful change in route feasibility.
@@ -99,19 +97,18 @@ export class Autopilot {
     if(s.paused)return wait("Game menu or cutscene active");
     const can=(a:Action)=> (this.failures.get(s.location+":"+actionKey(a))??0)<2;
     const mustSleep=s.time>=2250||s.energy<=12;
-    if(s.location==="FarmHouse" && (this.endingDay||mustSleep) && s.bed){
+    if(s.location==="FarmHouse" && mustSleep && s.bed){
       const action:Action={type:"sleep"};
-      return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
+      return can(action)?decision(action,s.energy<=12?"Rest: critically low energy":"End game day: late evening","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
     }
     if(s.location==="FarmHouse"&&s.time>=610 && s.time<2250 && s.energy>16){
       const action:Action={type:"travel_to",target:"Farm"};
       return can(action)?decision(action,"Return to farming","下地干活啦。"):wait("Farm commute repeatedly failed");
     }
     const goHome=():Decision=>{
-      this.endingDay=true;
       if(s.location==="FarmHouse"&&s.bed){
         const action:Action={type:"sleep"};
-        return can(action)?decision(action,"End game day","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
+        return can(action)?decision(action,s.energy<=12?"Rest: critically low energy":"End game day: late evening","回床上睡一觉！"):wait("Sleep repeatedly failed; manual help required");
       }
       const hop=nextHop(s,"FarmHouse");
       if(!hop)return wait("No home route");
@@ -150,7 +147,9 @@ export class Autopilot {
         if(till)return till;
       }
     }
-    return goHome();
+    // No useful work is not a reason to end a healthy morning/afternoon.
+    // Time continues advancing in the actual game while the controller waits.
+    return decision({type:"wait",seconds:15},"No actionable farm work; stay outside until evening","今天先休息一会儿。");
   }
 }
 export const mockDecision=(s:GameState)=>new Autopilot().decide(s);
