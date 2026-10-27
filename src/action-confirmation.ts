@@ -33,6 +33,10 @@ export function actionObserved(action:Action,before:GameState,after:GameState):b
     case "harvest_crop":return !after.crops.some(p=>p.x===action.x&&p.y===action.y&&p.ready);
     case "buy_seed":return (after.economy?.gold??0)<(before.economy?.gold??0) ||
       stackCount(after.economy?.bag,action.itemId)>stackCount(before.economy?.bag,action.itemId);
+    case "eat_food":return after.location===before.location &&
+      after.energy>before.energy &&
+      stackCount(after.economy?.bag,action.itemId) <
+        stackCount(before.economy?.bag,action.itemId);
     case "ship_item":return stackCount(after.economy?.bag,action.itemId)<stackCount(before.economy?.bag,action.itemId);
     case "store_item":return stackCount(after.economy?.bag,action.itemId)<stackCount(before.economy?.bag,action.itemId);
     case "withdraw_item":return stackCount(after.economy?.bag,action.itemId)>stackCount(before.economy?.bag,action.itemId);

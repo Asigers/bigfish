@@ -6,6 +6,7 @@ import { PiBrain } from "./brain.ts";
 import { EconomyPlanner, DEFAULT_STRATEGY } from "./economy.ts";
 import { ForagePlanner } from "./forage.ts";
 import { FarmResourcePlanner } from "./resources.ts";
+import { FoodPlanner } from "./food.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
@@ -22,6 +23,7 @@ const planner=new Autopilot();
 const economy=new EconomyPlanner();
 const forager=new ForagePlanner();
 const resourcePlanner=new FarmResourcePlanner();
+const foodPlanner=new FoodPlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
@@ -95,6 +97,7 @@ async function run():Promise<void>{
         economy.update(pending.before,pending.action,false);
         forager.observe(pending.before,pending.action,failedReceipt);
         resourcePlanner.observe(pending.before,pending.action,failedReceipt);
+        foodPlanner.observe(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
         unconfirmed=undefined;
@@ -105,6 +108,9 @@ async function run():Promise<void>{
         // A command whose result was lost still consumed the day's action budget.
         if(pending.action.type==="clear_resource")
           resourcePlanner.observe(pending.before,pending.action,{
+            id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
+        if(pending.action.type==="eat_food")
+          foodPlanner.observe(pending.before,pending.action,{
             id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
@@ -139,9 +145,10 @@ async function run():Promise<void>{
       const goal=memory.get()?.strategy??DEFAULT_STRATEGY;
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
-      const economic=economy.propose(s,goal);
-      let d:Decision=economic??planner.decide(s);
-      let forageChosen=false;
+      const foodNeed=foodPlanner.propose(s);
+      const economic=foodNeed?undefined:economy.propose(s,goal);
+      let d:Decision=foodNeed??economic??planner.decide(s);
+      let forageChosen=Boolean(foodNeed);
       // Productive gathering begins only after farming and financial errands have
       // no action; once started, the trip continues across maps until bounded.
       const canBeginForage=!economic && s.location==="Farm" &&
@@ -162,7 +169,7 @@ async function run():Promise<void>{
         try{
           const proposed=await brain.decide(s,recent,pendingViewerEvents);
           pendingViewerEvents.length=0;
-          const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can"];
+          const economyTransaction=["buy_seed","ship_item","store_item","withdraw_item","equip_tool","refill_watering_can","eat_food"];
           // Valid world action is not enough for money/inventory policy: the deterministic
           // decision also enforces seed budgets and preservation of essential supplies.
           if(!forageChosen && !economyTransaction.includes(d.action.type) &&
@@ -189,7 +196,7 @@ async function run():Promise<void>{
       console.log("[bigfish]",JSON.stringify({day:s.day,location:s.location,goal:goal.goal,action,reason:d.reason}));
       await say(d.speech,action,goal.notes);
       if(action.type==="wait"){await sleep(action.seconds*1000);continue;}
-      const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:15000;
+      const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:action.type==="eat_food"?25000:15000;
       const before=bridge.getStateSequence();
       result=await bridge.send(action,timeout);
       console.log("[game]",result.ok?"ok":"failed",result.message);
@@ -229,6 +236,7 @@ async function run():Promise<void>{
         economy.update(s,action,result.ok);
         forager.observe(s,action,result);
         resourcePlanner.observe(s,action,result);
+        foodPlanner.observe(s,action,result);
       }
     }
   }

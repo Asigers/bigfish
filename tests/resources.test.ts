@@ -51,6 +51,15 @@ test("daily material budget, energy and inventory limits are enforced",()=>{
   assert.equal(p.propose(s,true),undefined);
   assert.equal(p.propose({...s,day:3},true)?.action.type,"clear_resource");
 });
+test("resource goals include chest stock, so storage does not trigger redundant clearing",()=>{
+  const chest={x:5,y:4,items:[
+    {id:"(O)388",count:60,category:-16,sellable:false},
+    {id:"(O)390",count:40,category:-300,sellable:false},
+    {id:"(O)771",count:20,category:-16,sellable:false}
+  ]};
+  const stored:GameState={...base,economy:{...base.economy!,chests:[chest]}};
+  assert.equal(new FarmResourcePlanner().propose(stored,true),undefined);
+});
 test("blocked approach candidates and failed tools are not spammed",()=>{
   const target={...base,resources:[{x:9,y:9,kind:"stone" as const,health:2}]};
   const p=new FarmResourcePlanner();
