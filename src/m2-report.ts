@@ -19,12 +19,14 @@ async function report():Promise<void>{
   try{
     const measured=db.metrics(j.saveId,undefined,7);
     const campaign=j.campaign&&validCampaign(j.campaign)?j.campaign:undefined;
-    const ready=measured.recordedDays>=7&&measured.verifiedActions>=1&&
+    const consecutive=db.consecutiveDays(j.saveId,7);
+    const ready=consecutive&&measured.verifiedActions>=1&&
       campaign!==undefined;
     const data={
       assessment:ready?"controller_evidence_ready":"pending",
       consecutiveRealGameDaysClaimed:false,
-      recordedDays:measured.recordedDays,verifiedActions:measured.verifiedActions,
+      recordedDays:measured.recordedDays,sevenConsecutiveDays:consecutive,
+      verifiedActions:measured.verifiedActions,
       failureRate:measured.observedFailureRate,
       wateringActions:measured.verifiedWaterActions,
       measuredWaterEnergy:measured.meanWaterEnergy,
