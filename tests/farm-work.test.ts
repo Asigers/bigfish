@@ -16,7 +16,7 @@ const base:GameState={
   crops:[{x:6,y:6,watered:true,ready:false,seedId:"(O)472"}],
   emptyPlots:[{x:7,y:6,watered:true}],
   tillable:[{x:7,y:7},{x:8,y:7},{x:10,y:10},{x:11,y:10},{x:12,y:10},{x:13,y:10},
-    {x:14,y:11},{x:10,y:11}],
+    {x:14,y:11},{x:10,y:11},{x:9,y:12},{x:9,y:13},{x:10,y:13},{x:12,y:12}],
   resources:[{x:8,y:8,kind:"twig",health:1}],
   seeds:[{id:"(O)472",count:2}],
   cropCatalog:[{seedId:"(O)472",harvestId:"(O)24",seasons:["spring"],
