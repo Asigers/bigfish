@@ -60,11 +60,10 @@ export function buildFarmPlan(s:GameState,strategy:Strategy,
   let target=Math.max(currentPlots,Math.min(20,strategy.seedReserve));
   let revision="Set planting target from available capital, observed land and seed reserve";
   if(previous && previous.dayKey!==s.season+":"+s.day && previous.targetPlots>0){
-    const dry=previous.planted>0 && previous.watered<previous.planted;
     const failures=previous.failed>=3;
-    if(dry||failures){
+    if(failures){
       target=Math.max(currentPlots,Math.max(1,previous.targetPlots-2));
-      revision="Reduce planting target after missed watering or repeated failed work";
+      revision="Reduce planting target after repeated observed action failures";
     }else if(previous.planted>0 && previous.failed===0){
       target=Math.max(target,Math.min(20,previous.targetPlots+2));
       revision="Expand a little after completed, low-failure field work";
