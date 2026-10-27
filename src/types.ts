@@ -125,7 +125,8 @@ export function stateValidationIssues(input: unknown): string[] {
       /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as ForageItem).itemId));
   if(s.drops!==undefined)
     checkArray("drops",80,v=>coordinate(v)&&record(v)&&
-      typeof v.itemId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(v.itemId));
+      typeof (v as LooseDrop).itemId==="string"&&
+      /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as LooseDrop).itemId));
   if(s.resources !== undefined)
     checkArray("resources",120, v=>coordinate(v) &&
       ["tree","stone","twig","weed"].includes((v as ResourceNode).kind) &&
