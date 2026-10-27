@@ -175,6 +175,14 @@ test("simulated real craft -> placement -> dry next-day watering",{
     }
     assert.ok(house);
     assert.equal((await bridge.send({type:"sleep"},5000)).ok,true);
+    let woke:GameState|undefined;
+    const wakeDeadline=Date.now()+5000;
+    while(!woke&&Date.now()<wakeDeadline){
+      const now=bridge.getState();
+      if(now?.day===2&&now.location==="FarmHouse")woke=now;
+      else await new Promise(r=>setTimeout(r,50));
+    }
+    assert.ok(woke);
     assert.equal((await bridge.send({type:"travel_to",target:"Farm"},5000)).ok,true);
     const end=Date.now()+5000;
     let morning:GameState|undefined;
