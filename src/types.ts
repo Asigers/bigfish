@@ -146,7 +146,7 @@ export function stateValidationIssues(input: unknown): string[] {
       (typeof (v as CropTile).seedId==="string" &&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as CropTile).seedId!))));
   if(s.cropCatalog!==undefined)checkArray("cropCatalog",150,validCropInfo);
-  if(s.chestKits!==undefined && (!Number.isInteger(s.chestKits)||s.chestKits<0||s.chestKits>9999))issues.push("chestKits");
+  if(s.chestKits!==undefined && (!Number.isInteger(s.chestKits)||Number(s.chestKits)<0||Number(s.chestKits)>9999))issues.push("chestKits");
   if(s.canCraftChest!==undefined && typeof s.canCraftChest!=="boolean")issues.push("canCraftChest");
   if(s.placementSites!==undefined)checkArray("placementSites",80,coordinate);
   checkArray("emptyPlots", 250, v => coordinate(v) && typeof (v as PlotTile).watered === "boolean");
