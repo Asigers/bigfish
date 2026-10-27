@@ -1,5 +1,5 @@
 export type Tile = { x: number; y: number };
-export type CropTile = Tile & { watered: boolean; ready: boolean };
+export type CropTile = Tile & { watered: boolean; ready: boolean; seedId?:string };
 export type PlotTile = Tile & { watered: boolean };
 export type BagItem = { id: string; count: number; category: number; sellable: boolean };
 export type ChestSnapshot = Tile & { items: BagItem[] };
@@ -13,6 +13,9 @@ export type EconomyState = {
 export type SeedStack = { id: string; count: number };
 export type ForageItem = Tile & { itemId: string };
 export type FoodItem = { id:string; count:number; restoreEnergy:number };
+export type CropInfo = { seedId:string; harvestId:string; seasons:string[];
+  growthDays:number; regrowDays:number; sellPrice:number; minHarvest:number;
+  raised:boolean; needsWatering:boolean };
 export type LooseDrop = Tile & { itemId:string };
 export type ResourceKind = "tree" | "stone" | "twig" | "weed";
 export type ResourceNode = Tile & { kind:ResourceKind; health:number };
@@ -23,7 +26,7 @@ export type GameState = {
   energy: number; x: number; y: number; paused: boolean;
   pauseReason?: "none" | "menu" | "event" | "time_stopped";
   crops: CropTile[]; emptyPlots: PlotTile[]; tillable: Tile[];
-  seeds: SeedStack[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
+  seeds: SeedStack[]; cropCatalog?:CropInfo[]; food?: FoodItem[]; forage?: ForageItem[]; drops?: LooseDrop[]; resources?: ResourceNode[]; exits: Exit[]; worldLinks: WorldLink[];
   bed: Tile | null; inventoryFree: number;
   economy?: EconomyState; waterSources?: Tile[];
 };
@@ -63,6 +66,20 @@ export function sanitizeStateExits(input:unknown):{state:unknown;ignoredExits:nu
     ignoredExits:input.exits.length-exits.length};
 }
 
+export function validCropInfo(input:unknown):input is CropInfo {
+  if(!record(input))return false;
+  const c=input as CropInfo;
+  const id=(value:unknown)=>typeof value==="string"&&
+    /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(value);
+  return id(c.seedId)&&id(c.harvestId)&&
+    Array.isArray(c.seasons)&&c.seasons.length>=1&&c.seasons.length<=4 &&
+    c.seasons.every(season=>["spring","summer","fall","winter"].includes(season)) &&
+    Number.isInteger(c.growthDays)&&c.growthDays>0&&c.growthDays<=100 &&
+    Number.isInteger(c.regrowDays)&&c.regrowDays>=-1&&c.regrowDays<=60 &&
+    Number.isInteger(c.sellPrice)&&c.sellPrice>=0&&c.sellPrice<=1000000 &&
+    Number.isInteger(c.minHarvest)&&c.minHarvest>=1&&c.minHarvest<=100 &&
+    typeof c.raised==="boolean"&&typeof c.needsWatering==="boolean";
+}
 export function validState(input: unknown): input is GameState {
   if (!record(input)) return false;
   const s=input as Partial<GameState>;
@@ -71,10 +88,13 @@ export function validState(input: unknown): input is GameState {
     && (s.pauseReason === undefined || ["none","menu","event","time_stopped"].includes(s.pauseReason))
     && ["day","time","energy","x","y","inventoryFree"].every(k => Number.isFinite(s[k as keyof GameState]))
     && coordinate({x:s.x,y:s.y}) && Number(s.day) > 0 && Number(s.day) <= 28
-    && Array.isArray(s.crops) && s.crops.length <= 250 && s.crops.every(c=>coordinate(c)&&typeof c.watered==="boolean"&&typeof c.ready==="boolean")
+    && Array.isArray(s.crops) && s.crops.length <= 250 && s.crops.every(c=>coordinate(c)&&typeof c.watered==="boolean"&&typeof c.ready==="boolean"&&
+      (c.seedId===undefined || (typeof c.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.seedId))))
     && Array.isArray(s.emptyPlots) && s.emptyPlots.length <= 250 && s.emptyPlots.every(c=>coordinate(c)&&typeof c.watered==="boolean")
     && Array.isArray(s.tillable) && s.tillable.length <= 250 && s.tillable.every(coordinate)
     && Array.isArray(s.seeds) && s.seeds.length <= 120 && s.seeds.every(c=>record(c)&&typeof c.id==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(c.id)&&Number.isInteger(c.count)&&c.count>0)
+    && (s.cropCatalog===undefined || (Array.isArray(s.cropCatalog) &&
+      s.cropCatalog.length<=150 && s.cropCatalog.every(c=>validCropInfo(c))))
     && (s.forage === undefined || (Array.isArray(s.forage) && s.forage.length <= 80 &&
       s.forage.every(f=>coordinate(f)&&typeof f.itemId==="string"&&
         /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(f.itemId))))
@@ -114,7 +134,12 @@ export function stateValidationIssues(input: unknown): string[] {
     const index = values.findIndex(v => !validate(v));
     if (index >= 0) issues.push(key + "[" + index + "]");
   };
-  checkArray("crops", 250, v => coordinate(v) && typeof (v as CropTile).watered === "boolean" && typeof (v as CropTile).ready === "boolean");
+  checkArray("crops", 250, v => coordinate(v) && typeof (v as CropTile).watered === "boolean" &&
+    typeof (v as CropTile).ready === "boolean" &&
+    ((v as CropTile).seedId===undefined ||
+      (typeof (v as CropTile).seedId==="string" &&
+        /^\(O\)[A-Za-z0-9_.-]{1,80}$/.test((v as CropTile).seedId!))));
+  if(s.cropCatalog!==undefined)checkArray("cropCatalog",150,validCropInfo);
   checkArray("emptyPlots", 250, v => coordinate(v) && typeof (v as PlotTile).watered === "boolean");
   checkArray("tillable", 250, coordinate);
   checkArray("seeds", 120, v => record(v) && typeof v.id === "string" &&
