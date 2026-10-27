@@ -47,12 +47,12 @@ export function parseDecision(raw:string):Decision {
   let action:Action;
   if(a.type==="wait"&&Number.isInteger(a.seconds)&&Number(a.seconds)>=1&&Number(a.seconds)<=15)
     action={type:"wait",seconds:Number(a.seconds)};
-  else if(["move_to","water_tile","harvest_crop","till_tile","plant_seed","refill_watering_can"].includes(String(a.type)) &&
+  else if(["move_to","water_tile","harvest_crop","till_tile","plant_seed","refill_watering_can","collect_forage"].includes(String(a.type)) &&
     Number.isInteger(a.x)&&Number.isInteger(a.y)&&Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<256&&Number(a.y)<256){
       if(a.type==="plant_seed"&&typeof a.seedId==="string"&&/^\(O\)[A-Za-z0-9_.-]{1,80}$/.test(a.seedId))
         action={type:"plant_seed",x:Number(a.x),y:Number(a.y),seedId:a.seedId};
       else if(a.type!=="plant_seed")
-        action={type:a.type as "move_to"|"water_tile"|"harvest_crop"|"till_tile"|"refill_watering_can",x:Number(a.x),y:Number(a.y)};
+        action={type:a.type as "move_to"|"water_tile"|"harvest_crop"|"till_tile"|"refill_watering_can"|"collect_forage",x:Number(a.x),y:Number(a.y)};
       else throw Error("Bad seedId");
     }
   else if(a.type==="travel_to"&&typeof a.target==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(a.target))
@@ -175,6 +175,8 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
     const e=s.economy; const chest=e?.chests.find(c=>c.x===a.x&&c.y===a.y);
     return Boolean(chest&&close(here,chest)&&(a.type==="store_item"?e!.bag:chest.items).some(i=>i.id===a.itemId&&i.count>=a.count));
   }
+  if(a.type==="collect_forage")return s.inventoryFree>0 && close(here,a) &&
+    Boolean(s.forage?.some(item=>item.x===a.x&&item.y===a.y));
   if(s.location!=="Farm"||!close(here,a))return false;
   if(a.type==="water_tile")return s.crops.some(c=>c.x===a.x&&c.y===a.y&&!c.watered);
   if(a.type==="harvest_crop")return s.inventoryFree>0&&s.crops.some(c=>c.x===a.x&&c.y===a.y&&c.ready);
