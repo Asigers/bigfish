@@ -1,6 +1,7 @@
 import type { Decision, GameState, ViewerEvent, ActionResult } from "./types.ts";
 import { parseDecision, validateAgainstWorld } from "./decision.ts";
 import { parseStrategy } from "./strategy.ts";
+import {parseCampaign, type CampaignProposal} from "./campaign.ts";
 import type { Strategy } from "./economy.ts";
 import { chooseModel, parseThinkingLevel } from "./model-config.ts";
 
@@ -79,6 +80,24 @@ export class PiBrain {
       if(!answer)throw Error("No strategy response");
       return parseStrategy(answer);
     }finally{clearTimeout(timeout);}
+  }
+  async proposeCampaign(s:GameState,feedback:string[]):Promise<CampaignProposal>{
+    if(!this.session)throw Error("Brain not started");
+    const timer=setTimeout(()=>{void this.session?.abort();},22000);
+    try{
+      await this.session.prompt([
+        "MULTI-DAY FARM OBJECTIVE ONLY. Return one JSON object with exact shape:",
+        '{"goals":["expand_fields","save_gold"],"horizonDays":5,"targetPlots":8,"cashFloor":150,"rationale":"short reason"}.',
+        "goals: 1-3 distinct entries selected from expand_fields,build_storage,automate_watering,save_gold.",
+        "horizonDays must be 3-7; targetPlots 1-20; cashFloor 100-5000.",
+        "Do not invent ore, money, items, learned recipes or executed actions.",
+        "Blocked game skills remain blocked. This is goal selection, not command authorization.",
+        JSON.stringify({state:s,verifiedFeedback:feedback.slice(-6)})
+      ].join("\n"));
+      const result=this.session.getLastAssistantText();
+      if(!result)throw Error("No campaign response");
+      return parseCampaign(result);
+    }finally{clearTimeout(timer);}
   }
   stop():void {this.session?.dispose();this.session=undefined;}
 }

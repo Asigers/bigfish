@@ -50,12 +50,15 @@ export function validWorkProject(input:unknown):input is FarmWorkProject{
     typeof t.reason==="string"&&t.reason.length<=200);
 }
 /** No imaginary construction: crafting stays blocked until a real craft skill exists. */
-export function updateWorkProject(s:GameState,previous?:FarmWorkProject):FarmWorkProject|undefined{
+export function updateWorkProject(s:GameState,previous?:FarmWorkProject,
+  controls?:{cashReserve:number;collectWood:boolean}):FarmWorkProject|undefined{
   // Only the farm snapshot includes the owned chests. Shop maps under-report inventory.
   if(s.location!=="Farm"||!s.economy)return previous?.saveId===s.saveId?previous:undefined;
   const old=previous?.saveId===s.saveId&&validWorkProject(previous)?previous:undefined;
-  const materialTargets=old?.materialTargets??{...defaultMaterialTargets};
-  const cashReserve=old?.cashReserve??100;
+  const materialTargets=controls ? {...defaultMaterialTargets,
+    "(O)388":controls.collectWood?50:0,
+    "(O)390":0,"(O)771":0} : old?.materialTargets??{...defaultMaterialTargets};
+  const cashReserve=controls?Math.max(100,Math.min(5000,controls.cashReserve)):old?.cashReserve??100;
   const count=(id:MaterialId)=>stock(s,id);
   const chestAlreadyPlaced=s.economy.chests.length>0;
   const kitReady=(s.chestKits??0)>0;
