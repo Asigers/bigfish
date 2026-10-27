@@ -75,6 +75,13 @@ export function parseDecision(raw:string):Decision {
       kind:a.kind as "tree"|"stone"|"twig"|"weed"};
   else if(a.type==="equip_tool"&&["hoe","watering_can","axe","pickaxe","scythe"].includes(String(a.tool)))
     action={type:"equip_tool",tool:a.tool as "hoe"|"watering_can"|"axe"|"pickaxe"|"scythe"};
+  else if(a.type==="craft_sprinkler"&&["basic","quality","iridium"].includes(String(a.kind)))
+    action={type:"craft_sprinkler",kind:a.kind as "basic"|"quality"|"iridium"};
+  else if(a.type==="place_sprinkler"&&["basic","quality","iridium"].includes(String(a.kind))&&
+    Number.isInteger(a.x)&&Number.isInteger(a.y)&&
+    Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<150&&Number(a.y)<150)
+    action={type:"place_sprinkler",kind:a.kind as "basic"|"quality"|"iridium",
+      x:Number(a.x),y:Number(a.y)};
   else if(a.type==="craft_chest")action={type:"craft_chest"};
   else if(a.type==="place_chest"&&Number.isInteger(a.x)&&Number.isInteger(a.y)&&
     Number(a.x)>=0&&Number(a.y)>=0&&Number(a.x)<150&&Number(a.y)<150)
@@ -175,6 +182,15 @@ export function validateAgainstWorld(a:Action,s:GameState):boolean {
   if(a.type==="wait")return true;
   if(s.paused)return false;
   if(a.type==="sleep")return s.location==="FarmHouse"&&s.bed!==null;
+  if(a.type==="craft_sprinkler"){
+    const recipe=s.sprinklerRecipes?.find(r=>r.kind===a.kind);
+    return s.location==="Farm"&&s.inventoryFree>0&&recipe?.learned===true&&
+      recipe.canCraft===true&&Boolean(s.economy);
+  }
+  if(a.type==="place_sprinkler")return s.location==="Farm"&&
+    (s.sprinklerKits?.find(k=>k.kind===a.kind)?.count??0)>0 &&
+    close(here,a)&&s.sprinklerSites?.some(t=>t.x===a.x&&t.y===a.y)===true&&
+    !s.installedSprinklers?.some(t=>t.x===a.x&&t.y===a.y);
   if(a.type==="craft_chest")return s.location==="Farm" && s.canCraftChest===true &&
     s.inventoryFree>0 && (s.chestKits??0)===0 &&
     Boolean(s.economy?.bag.some(i=>i.id==="(O)388"&&i.count>=50)) &&

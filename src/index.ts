@@ -9,6 +9,7 @@ import { FarmResourcePlanner } from "./resources.ts";
 import { FoodPlanner } from "./food.ts";
 import { DropPlanner } from "./drops.ts";
 import { InfrastructurePlanner } from "./infrastructure.ts";
+import {reconcileSprinkler,SprinklerPlanner} from "./sprinklers.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
 import { startSimulator } from "./simulator.ts";
@@ -31,6 +32,7 @@ const resourcePlanner=new FarmResourcePlanner();
 const foodPlanner=new FoodPlanner();
 const dropPlanner=new DropPlanner();
 const infrastructure=new InfrastructurePlanner();
+const sprinklerPlanner=new SprinklerPlanner();
 const memory=new GoalMemory();
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
@@ -107,6 +109,7 @@ async function run():Promise<void>{
         foodPlanner.observe(pending.before,pending.action,failedReceipt);
         dropPlanner.observe(pending.before,pending.action,failedReceipt);
         infrastructure.observe(pending.before,pending.action,failedReceipt);
+        sprinklerPlanner.observe(pending.before,pending.action,failedReceipt);
         await memory.recordFarmResult(pending.before,pending.action,failedReceipt);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
@@ -228,6 +231,19 @@ async function run():Promise<void>{
       }
       await memory.observeFarmOccupancy(s);
       const field=memory.get()?.farmPlan;
+      if(s.location==="Farm"){
+        const former=memory.get()?.sprinklerProject;
+        const goal=reconcileSprinkler(s,field,former);
+        if(goal){
+          await memory.setSprinklerProject(s,goal);
+          if(!former||former.status!==goal.status||former.verifiedWatered!==goal.verifiedWatered)
+            console.log("[sprinkler]",JSON.stringify({
+              kind:goal.kind,site:goal.site,coverage:goal.expectedCoverage,
+              status:goal.status,ingredients:goal.ingredients,
+              verifiedWatered:goal.verifiedWatered??0
+            }));
+        }
+      }
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
       const foodNeed=foodPlanner.propose(s);
@@ -244,15 +260,18 @@ async function run():Promise<void>{
       const construction=canBeginForage && !forager.isActive ?
         infrastructure.propose(s,project,field) : undefined;
       if(construction){d=construction;forageChosen=true;}
+      const irrigation=canBeginForage && !forager.isActive && !construction ?
+        sprinklerPlanner.propose(s,memory.get()?.sprinklerProject):undefined;
+      if(irrigation){d=irrigation;forageChosen=true;}
       // Real drop recovery precedes further resource destruction and map touring.
-      const dropDecision=!economic && !construction && (canBeginForage||forager.isActive) ?
+      const dropDecision=!economic && !construction && !irrigation && (canBeginForage||forager.isActive) ?
         dropPlanner.propose(s) : undefined;
       if(dropDecision){d=dropDecision;forageChosen=true;}
       // Work on immediate, measured materials before setting out for longer foraging.
-      const resourceDecision=canBeginForage && !forager.isActive && !dropDecision && !construction ?
+      const resourceDecision=canBeginForage && !forager.isActive && !dropDecision && !construction && !irrigation ?
         resourcePlanner.propose(s,true,project) : undefined;
       if(resourceDecision){d=resourceDecision;forageChosen=true;}
-      if(!economic && !construction && !dropDecision && !resourceDecision && (forager.isActive || canBeginForage)){
+      if(!economic && !construction && !irrigation && !dropDecision && !resourceDecision && (forager.isActive || canBeginForage)){
         const forageDecision=forager.propose(s,canBeginForage);
         if(forageDecision){d=forageDecision;forageChosen=true;}
       }
@@ -305,7 +324,7 @@ async function run():Promise<void>{
         }
       }
       recent.push(result);if(recent.length>8)recent.shift();
-      if(["buy_seed","ship_item","store_item","withdraw_item","sleep","harvest_crop","craft_chest","place_chest"].includes(action.type))
+      if(["buy_seed","ship_item","store_item","withdraw_item","sleep","harvest_crop","craft_chest","place_chest","craft_sprinkler","place_sprinkler"].includes(action.type))
         await memory.note(action.type+": "+result.message,result.ok);
       if(!result.ok)await say("哎呀，刚才失败了："+result.message,{type:"wait",seconds:1},goal.notes,false);
       await sleep(result.ok?200:1200);
@@ -331,6 +350,7 @@ async function run():Promise<void>{
         foodPlanner.observe(s,action,result);
         dropPlanner.observe(s,action,result);
         infrastructure.observe(s,action,result);
+        sprinklerPlanner.observe(s,action,result);
         if(result.id!=="local-failure" && (!result.ok||stateConfirmed))
           await memory.recordFarmResult(s,action,result);
       }

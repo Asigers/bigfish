@@ -80,7 +80,8 @@ export class EconomyPlanner {
     // so selling any food here could remove the last emergency meal.
     const foodIds=new Set(s.food?.map(f=>f.id)??[]);
     // Protect farm construction materials even when the game marks them saleable.
-    const reservedMaterials=new Set(["(O)388","(O)390","(O)771","(O)382","(O)92"]);
+    const reservedMaterials=new Set(["(O)388","(O)390","(O)771","(O)382","(O)92",
+      "(O)334","(O)335","(O)336","(O)337","(O)338","(O)787"]);
     const sellable=e.bag.filter(x=>x.sellable&&x.category!==-74&&x.count>0 &&
       !foodIds.has(x.id) && !reservedMaterials.has(x.id));
     if(s.location==="Farm"){

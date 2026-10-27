@@ -1,4 +1,4 @@
-import type { ActionResult, Command, GameState, BagItem, Tile, EconomyState, ResourceNode } from "./types.ts";
+import type { ActionResult, Command, GameState, BagItem, Tile, EconomyState, ResourceNode, SprinklerKind, SprinklerRecipe } from "./types.ts";
 type Room="Farm"|"FarmHouse"|"BusStop"|"Town"|"SeedShop";
 const exits:Record<Room,{x:number;y:number;target:Room}[]>={
   Farm:[{x:6,y:2,target:"FarmHouse"},{x:8,y:6,target:"BusStop"}],
@@ -8,7 +8,7 @@ const exits:Record<Room,{x:number;y:number;target:Room}[]>={
   SeedShop:[{x:3,y:11,target:"Town"}]
 };
 const allLinks=Object.entries(exits).flatMap(([from,list])=>list.map(to=>({from,to:to.target})));
-export function startSimulator(port:number,token:string,options:{initialEnergy?:number;initialChests?:number;initialWood?:number}={}):()=>void{
+export function startSimulator(port:number,token:string,options:{initialEnergy?:number;initialChests?:number;initialWood?:number;initialSprinklerMaterials?:boolean;initialSprinklerKit?:boolean}={}):()=>void{
   const economy={
     gold:220,
     bag:[{id:"(O)472",count:2,category:-74,sellable:false}] as BagItem[],
@@ -19,9 +19,21 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
   };
   if(options.initialWood) economy.bag.push({
     id:"(O)388",count:options.initialWood,category:-16,sellable:false});
+  if(options.initialSprinklerMaterials){
+    economy.bag.push({id:"(O)334",count:1,category:-15,sellable:false});
+    economy.bag.push({id:"(O)335",count:1,category:-15,sellable:false});
+  }
+  if(options.initialSprinklerKit)
+    economy.bag.push({id:"(O)599",count:1,category:-8,sellable:false});
   const savedChests=economy.chests;
+  const installedSprinklers:{kind:SprinklerKind;x:number;y:number}[]=[];
+  const sprinklerDefs:{kind:SprinklerKind;id:string;ingredients:{id:string;count:number}[]}[]=[
+    {kind:"basic",id:"(O)599",ingredients:[{id:"(O)334",count:1},{id:"(O)335",count:1}]},
+    {kind:"quality",id:"(O)621",ingredients:[{id:"(O)336",count:1},{id:"(O)338",count:1}]},
+    {kind:"iridium",id:"(O)645",ingredients:[{id:"(O)337",count:1},{id:"(O)787",count:1}]}
+  ];
   let craftedChestKits=0;
-  const sites=[{x:4,y:7},{x:7,y:10},{x:11,y:11}];
+  const sites=[{x:4,y:7},{x:7,y:10},{x:11,y:11},{x:5,y:5}];
   const farmDrops:{x:number;y:number;itemId:string}[]=[];
   const farmResources:ResourceNode[]=[
     {x:7,y:7,kind:"twig",health:1},{x:8,y:7,kind:"stone",health:2},
@@ -58,6 +70,18 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
     state.exits=exits[room]??[];
     state.forage=forageByRoom[room]??[];
     state.resources=room==="Farm"?farmResources:[];
+    state.isRaining=false;
+    state.installedSprinklers=room==="Farm"?installedSprinklers:[];
+    state.sprinklerSites=room==="Farm"?sites.filter(p=>
+      !installedSprinklers.some(i=>i.x===p.x&&i.y===p.y) &&
+      !savedChests.some(c=>c.x===p.x&&c.y===p.y)):[];
+    state.sprinklerRecipes=room==="Farm"?sprinklerDefs.map(def=>({
+      kind:def.kind,itemId:def.id,learned:true,
+      canCraft:def.ingredients.every(i=>economy.bag.some(item=>
+        item.id===i.id&&item.count>=i.count)),ingredients:def.ingredients
+    } as SprinklerRecipe)):[];
+    state.sprinklerKits=sprinklerDefs.map(d=>({kind:d.kind,
+      count:economy.bag.find(i=>i.id===d.id)?.count??0}));
     state.surveyTiles=room==="Farm"?(()=>{
       const tiles=[] as NonNullable<GameState["surveyTiles"]>;
       for(let dx=-7;dx<=7;dx++)for(let dy=-7;dy<=7;dy++){
@@ -116,8 +140,33 @@ export function startSimulator(port:number,token:string,options:{initialEnergy?:
         else{
           state.day++;state.time=610;state.energy=200;state.location="FarmHouse";
           economy.gold+=shippingIncome;shippingIncome=0;
-          state.crops=state.crops.map(c=>({...c,watered:false,ready:true}));
+          state.crops=state.crops.map(c=>({...c,
+            watered:installedSprinklers.some(i=>{
+              const dx=Math.abs(i.x-c.x),dy=Math.abs(i.y-c.y);
+              return dx+dy>0&&(i.kind==="basic"?dx+dy===1:
+                Math.max(dx,dy)<=(i.kind==="quality"?1:2));
+            }),ready:true}));
           economy.tools.waterLeft=40;
+        }
+      }
+      else if(c.type==="craft_sprinkler"){
+        const spec=sprinklerDefs.find(d=>d.kind===c.kind);
+        if(state.location!=="Farm"||!spec||state.inventoryFree<=0||
+          !spec.ingredients.every(i=>economy.bag.some(b=>b.id===i.id&&b.count>=i.count)))ok=false;
+        else{
+          for(const ingredient of spec.ingredients)remove(ingredient.id,ingredient.count);
+          add(spec.id,1,-8,false);
+        }
+      }
+      else if(c.type==="place_sprinkler"){
+        const spec=sprinklerDefs.find(d=>d.kind===c.kind);
+        const near=Math.max(Math.abs(state.x-c.x),Math.abs(state.y-c.y))<=1;
+        if(state.location!=="Farm"||!spec||!near||
+          !state.sprinklerSites?.some(p=>p.x===c.x&&p.y===c.y)||
+          !economy.bag.some(i=>i.id===spec.id&&i.count>0))ok=false;
+        else{
+          remove(spec.id,1);
+          installedSprinklers.push({x:c.x,y:c.y,kind:c.kind});
         }
       }
       else if(c.type==="craft_chest"){

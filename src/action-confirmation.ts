@@ -6,6 +6,23 @@ function stackCount(items:{id:string;count:number}[]|undefined,id:string):number
 export function actionObserved(action:Action,before:GameState,after:GameState):boolean {
   if(after.saveId!==before.saveId)return false;
   switch(action.type){
+    case "craft_sprinkler":{
+      const id={"basic":"(O)599","quality":"(O)621","iridium":"(O)645"}[action.kind];
+      const r=before.sprinklerRecipes?.find(r=>r.kind===action.kind);
+      return before.location==="Farm"&&after.location==="Farm"&&r!==undefined&&
+        (after.sprinklerKits?.find(k=>k.kind===action.kind)?.count??0)>
+          (before.sprinklerKits?.find(k=>k.kind===action.kind)?.count??0)&&
+        stackCount(after.economy?.bag,id)>stackCount(before.economy?.bag,id)&&
+        r.ingredients.every(i=>stackCount(after.economy?.bag,i.id)<
+          stackCount(before.economy?.bag,i.id));
+    }
+    case "place_sprinkler":return before.location==="Farm"&&after.location==="Farm"&&
+      (after.sprinklerKits?.find(k=>k.kind===action.kind)?.count??0)<
+        (before.sprinklerKits?.find(k=>k.kind===action.kind)?.count??0)&&
+      before.installedSprinklers!==undefined&&after.installedSprinklers!==undefined&&
+      !before.installedSprinklers.some(t=>t.x===action.x&&t.y===action.y)&&
+      after.installedSprinklers.some(t=>t.kind===action.kind&&
+        t.x===action.x&&t.y===action.y);
     case "craft_chest":return before.location==="Farm" && after.location==="Farm" &&
       (after.chestKits??0)>(before.chestKits??0) &&
       stackCount(after.economy?.bag,"(O)388")<
