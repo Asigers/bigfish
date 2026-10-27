@@ -8,7 +8,7 @@ const exits:Record<Room,{x:number;y:number;target:Room}[]>={
   SeedShop:[{x:3,y:11,target:"Town"}]
 };
 const allLinks=Object.entries(exits).flatMap(([from,list])=>list.map(to=>({from,to:to.target})));
-export function startSimulator(port:number,token:string):()=>void{
+export function startSimulator(port:number,token:string,options:{initialEnergy?:number}={}):()=>void{
   const economy={
     gold:220,
     bag:[{id:"(O)472",count:2,category:-74,sellable:false}] as BagItem[],
@@ -30,7 +30,7 @@ export function startSimulator(port:number,token:string):()=>void{
     SeedShop:[]
   };
   const state:GameState={
-    saveId:"demo-save",location:"Farm",day:1,season:"spring",time:610,energy:200,x:4,y:4,paused:false,
+    saveId:"demo-save",location:"Farm",day:1,season:"spring",time:610,energy:options.initialEnergy??200,x:4,y:4,paused:false,
     crops:[{x:5,y:4,watered:false,ready:false}],emptyPlots:[{x:6,y:5,watered:false}],
     tillable:[{x:6,y:6}],seeds:[{id:"(O)472",count:2}],forage:forageByRoom.Farm,exits:exits.Farm,
     worldLinks:allLinks,bed:null,inventoryFree:10,waterSources:[{x:4,y:6}],economy
@@ -40,6 +40,8 @@ export function startSimulator(port:number,token:string):()=>void{
   let busy=false,shippingIncome=0;
   function sync():void {
     state.seeds=economy.bag.filter(i=>i.category===-74).map(i=>({id:i.id,count:i.count}));
+    state.food=economy.bag.filter(i=>["(O)16","(O)18"].includes(i.id))
+      .map(i=>({id:i.id,count:i.count,restoreEnergy:i.id==="(O)16"?30:35}));
     state.inventoryFree=Math.max(0,10-economy.bag.length);
     const room=state.location as Room;
     state.exits=exits[room]??[];
@@ -124,6 +126,11 @@ export function startSimulator(port:number,token:string):()=>void{
       else if(c.type==="buy_seed"){
         if(state.location!=="SeedShop"||!economy.shop?.open||c.count<1||c.count>12||economy.gold<20*c.count)ok=false;
         else{economy.gold-=20*c.count;add(c.itemId,c.count,-74,false);}
+      }
+      else if(c.type==="eat_food"){
+        const food=state.food?.find(i=>i.id===c.itemId);
+        if(state.energy>80 || !food || !remove(c.itemId,1))ok=false;
+        else state.energy=Math.min(200,state.energy+food.restoreEnergy);
       }
       else if(c.type==="ship_item"){
         const bag=economy.bag.find(i=>i.id===c.itemId&&i.sellable);
