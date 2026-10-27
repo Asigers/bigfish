@@ -5,6 +5,7 @@ import { nextLocation } from "./economy.ts";
 // This is a bounded collection route, not a random walk: each location is inspected
 // once per game day, each failed interaction is bounded, and all targets are sensed.
 export class ForagePlanner {
+  get isActive():boolean{return this.active;}
   private dayKey="";
   private active=false;
   private finished=false;
