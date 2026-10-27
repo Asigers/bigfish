@@ -225,7 +225,10 @@ public sealed class ModEntry : Mod
                     var crop = dirt.crop;
                     bool ready = !crop.dead.Value && crop.currentPhase.Value >= crop.phaseDays.Count - 1 &&
                                  (!crop.fullyGrown.Value || crop.dayOfCurrentPhase.Value <= 0);
-                    crops.Add(new { x, y, watered = dirt.state.Value == 1, ready });
+                    var id = crop.netSeedIndex.Value;
+                    crops.Add(new { x, y, watered = dirt.state.Value == 1, ready,
+                        seedId = !string.IsNullOrEmpty(id) && id.All(char.IsLetterOrDigit) ?
+                            "(O)" + id : null });
                 }
                 else emptyPlots.Add(new { x, y, watered = dirt.state.Value == 1 });
                 if (crops.Count + emptyPlots.Count >= 200) break;
@@ -314,6 +317,34 @@ public sealed class ModEntry : Mod
                 Math.Abs(d.pos!.Value.Y - player.TilePoint.Y))
             .Take(80)
             .Select(d => new { x = d.pos!.Value.X, y = d.pos!.Value.Y, itemId = d.id! })
+            .ToArray();
+        // Read the installed game's current crop data: never assume vanilla
+        // growth times, season restrictions or base selling prices.
+        var cropCatalog = (Game1.cropData ?? new Dictionary<string, StardewValley.GameData.Crops.CropData>())
+            .Where(entry => entry.Value != null &&
+                entry.Key.Length <= 60 && entry.Key.All(char.IsLetterOrDigit) &&
+                entry.Value.Seasons.Any(season =>
+                    season.ToString().Equals(Game1.currentSeason, StringComparison.OrdinalIgnoreCase)))
+            .Take(150)
+            .Select(entry =>
+            {
+                var cropData = entry.Value;
+                var harvest = cropData.HarvestItemId;
+                var hasPrice = harvest != null && Game1.objectData.TryGetValue(harvest, out _);
+                return new {
+                    seedId = "(O)" + entry.Key,
+                    harvestId = "(O)" + (harvest ?? ""),
+                    seasons = cropData.Seasons.Select(season => season.ToString().ToLowerInvariant()).ToArray(),
+                    growthDays = cropData.DaysInPhase.Sum(),
+                    regrowDays = cropData.RegrowDays,
+                    sellPrice = hasPrice ? Game1.objectData[harvest!].Price : 0,
+                    minHarvest = Math.Max(1, cropData.HarvestMinStack),
+                    raised = cropData.IsRaised,
+                    needsWatering = cropData.NeedsWatering
+                };
+            })
+            .Where(c => c.harvestId.Length > 3 && c.growthDays > 0 && c.growthDays <= 100 &&
+                c.minHarvest <= 100 && c.regrowDays >= -1 && c.regrowDays <= 60)
             .ToArray();
         var seeds = player.Items.Where(i => i != null && i.Category == -74 && i.QualifiedItemId.StartsWith("(O)"))
             .GroupBy(i => i!.QualifiedItemId)
@@ -406,7 +437,7 @@ public sealed class ModEntry : Mod
             day = Game1.dayOfMonth, season = Game1.currentSeason, time = Game1.timeOfDay,
             energy = (double)player.Stamina, x = player.TilePoint.X, y = player.TilePoint.Y,
             paused = pauseReason != "none", pauseReason,
-            crops, emptyPlots, tillable, seeds, food, forage, resources, drops, exits, worldLinks = links, waterSources,
+            crops, emptyPlots, tillable, seeds, cropCatalog, food, forage, resources, drops, exits, worldLinks = links, waterSources,
             bed = bed.HasValue ? new { x = bed.Value.X, y = bed.Value.Y } : null,
             inventoryFree = player.freeSpotsInInventory()
         };
