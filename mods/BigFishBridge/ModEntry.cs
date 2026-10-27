@@ -456,7 +456,7 @@ public sealed class ModEntry : Mod
             }).ToArray();
         var sprinklerKits = SprinklerKinds.Select(spec => new {kind = spec.Kind,
             count = OwnedItemCount(player,spec.ItemId)}).ToArray();
-        var installedSprinklers = loc.Name=="Farm" ?
+        object[] installedSprinklers = loc.Name=="Farm" ?
             loc.objects.Pairs.Where(pair => pair.Value is SObject o && o.IsSprinkler() &&
                 pair.Key.X>=0 && pair.Key.Y>=0 && pair.Key.X<150 && pair.Key.Y<150)
             .Take(160).Select(pair => new {x=(int)pair.Key.X,y=(int)pair.Key.Y,
