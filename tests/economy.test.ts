@@ -33,6 +33,12 @@ test("seed shopping is multi-map and respects actual price and current funds",()
     shop:{keeper:{x:5,y:4},open:true,offers:[{id:"(O)472",price:20,stock:12}]}}};
   assert.deepEqual(planner.propose(shop)?.action,{type:"buy_seed",itemId:"(O)472",count:6});
 });
+test("shop restock trip starts in early morning once chores finish",()=>{
+  const early={...base,time:610};
+  assert.deepEqual(new EconomyPlanner().propose(early)?.action,
+    {type:"travel_to",target:"BusStop"});
+});
+
 test("store materials if backpack full, and recover stored seeds",()=>{
   const planner=new EconomyPlanner();
   const material={id:"(O)388",count:5,category:-16,sellable:false};
