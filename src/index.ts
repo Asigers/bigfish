@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { GameBridge, CommandOutcomeUnknownError } from "./bridge.ts";
 import { Autopilot, validateAgainstWorld } from "./decision.ts";
 import { PiBrain } from "./brain.ts";
@@ -13,7 +14,7 @@ const demo=process.argv.includes("--demo");
 const mock=demo||process.argv.includes("--mock");
 const token=process.env.BIGFISH_TOKEN||(demo?randomBytes(24).toString("hex"):"");
 const port=Number(process.env.BIGFISH_PORT||"45931");
-const bridge=new GameBridge(token,port);
+const bridge=new GameBridge(token,port,"127.0.0.1",demo?undefined:join(process.cwd(),"data","bridge-commands.json"));
 const brain=mock?undefined:new PiBrain();
 const planner=new Autopilot();
 const economy=new EconomyPlanner();
@@ -50,6 +51,13 @@ async function say(text:string,action:Action,goal:string,ok=true):Promise<void>{
 async function run():Promise<void>{
   await memory.load();
   await bridge.start();
+  const restored=bridge.getUncertain();
+  if(restored){
+    unconfirmed={action:restored.cmd,before:restored.before,
+      sequence:bridge.getStateSequence(),lastWarningAt:Date.now(),
+      since:Date.now(),commandId:restored.cmd.id};
+    console.warn("[bigfish] persisted game command requires reconciliation before new actions");
+  }
   console.log("[bigfish] 127.0.0.1:"+port+" | mode="+(demo?"demo":mock?"mock":"pi")+
     " | OBS avatar: http://127.0.0.1:"+port+"/overlay");
   if(demo)stopDemo=startSimulator(port,token);
