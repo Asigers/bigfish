@@ -47,6 +47,7 @@ export class GoalMemory{
     const plan=p as FarmPlan;
     return plan.saveId===save && plan.dayKey===day &&
       Number.isInteger(plan.targetPlots)&&plan.targetPlots>=0&&plan.targetPlots<=20 &&
+      Number.isInteger(plan.occupiedPlots)&&plan.occupiedPlots>=0&&plan.occupiedPlots<=250 &&
       Array.isArray(plan.fieldTiles)&&plan.fieldTiles.length<=20 &&
       plan.fieldTiles.every(t=>Number.isInteger(t.x)&&Number.isInteger(t.y)&&
         t.x>=0&&t.y>=0&&t.x<150&&t.y<150) &&
@@ -94,6 +95,16 @@ export class GoalMemory{
       targetPlots:plan.targetPlots,openingGold:s.economy?.gold??0,
       closingGold:s.economy?.gold??0,planted:0,watered:0,harvested:0,failed:0};
     await this.persist();
+  }
+  async observeFarmOccupancy(s:GameState):Promise<void>{
+    const plan=this.journal?.farmPlan;
+    if(!plan||s.location!=="Farm"||this.journal?.saveId!==s.saveId||
+      plan.dayKey!==s.season+":"+s.day)return;
+    // Persist only on change. A shop visit must never reset crop occupancy to zero.
+    if(plan.occupiedPlots!==s.crops.length){
+      plan.occupiedPlots=s.crops.length;
+      await this.persist();
+    }
   }
   async recordFarmResult(s:GameState,action:Action,result:ActionResult):Promise<void>{
     const j=this.journal,progress=j?.dailyProgress;
