@@ -150,6 +150,15 @@ export class ShowDirector{
     const c=this.journal?.challenge;
     if(!c||c.status!=="active"||this.journal?.saveId!==s.saveId||
       gameOrdinal(s)!==c.startedOrdinal||!commandId||!applicable(c.id,action))return [];
+    if(s.time>c.deadline||
+      (c.id==="no_spend_expansion"&&s.economy&&s.economy.gold<c.openingGold)){
+      c.status="lost";
+      c.endReason=s.time>c.deadline?
+        "Verified action occurred after show deadline":"Actual spending violated challenge";
+      await this.save();
+      return [{kind:"lost",challenge:{...c},
+        fact:`${c.title} 未达成：${c.progress}/${c.target}`}];
+    }
     const key=actionKey(action);
     if(c.verifiedKeys.includes(key))return [];
     c.verifiedKeys.push(key);
