@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {mkdtemp,rm} from "node:fs/promises";
+import {randomBytes} from "node:crypto";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {ShowDirector,eligibleChallenges,chooseChallenge,validShowJournal}
@@ -8,6 +9,9 @@ import {ShowDirector,eligibleChallenges,chooseChallenge,validShowJournal}
 import {NarrationScheduler} from "../src/narration.ts";
 import {parseLiveSpeech,parseShowPick} from "../src/live-brain.ts";
 import {EconomyPlanner,DEFAULT_STRATEGY} from "../src/economy.ts";
+import {GameBridge} from "../src/bridge.ts";
+import {startSimulator} from "../src/simulator.ts";
+import {actionObserved} from "../src/action-confirmation.ts";
 import type {GameState,Action} from "../src/types.ts";
 const base:GameState={
   saveId:"live-test",year:1,season:"spring",day:6,time:840,
@@ -183,4 +187,49 @@ test("unconfirmed game commands never count as a successful show or speech",asyn
     assert.equal(rendered.length,1);
     assert.match(rendered[0],/没成功/);
   }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("live bridge event: only a state-confirmed forage action wins and is narrated",{
+  timeout:15000
+},async()=>{
+  const {dir,show}=await director();
+  const token=randomBytes(24).toString("hex"),bridge=new GameBridge(token,0);
+  await bridge.start();
+  const stop=startSimulator(bridge.listeningPort(),token);
+  try{
+    let initial:GameState|undefined;
+    const deadline=Date.now()+4000;
+    while(!initial&&Date.now()<deadline){
+      const state=bridge.getState();
+      if(state?.location==="Farm"&&state.forage?.length)initial=state;
+      else await new Promise(r=>setTimeout(r,50));
+    }
+    assert.ok(initial);
+    await show.sync(initial);
+    const option=eligibleChallenges(initial).find(c=>c.id==="forage_find");
+    assert.ok(option);
+    const start=await show.start(initial,option);
+    assert.equal(start?.kind,"start");
+    const pickup=initial.forage![0],action:Action={type:"collect_forage",
+      x:pickup.x,y:pickup.y};
+    assert.equal(show.get()?.challenge?.progress,0);
+    const seq=bridge.getStateSequence();
+    const receipt=await bridge.send(action,4000);
+    assert.equal(receipt.ok,true);
+    // ACK alone is not evidence and cannot trigger success.
+    assert.equal(show.get()?.challenge?.status,"active");
+    const after=await bridge.waitForNextState(seq,4000,
+      state=>actionObserved(action,initial!,state));
+    const finished=await show.observed(after,action,receipt.id);
+    assert.equal(finished[0]?.kind,"won");
+    const voice=new NarrationScheduler(0);
+    voice.show(after,finished[0]);
+    const lines:string[]=[];
+    voice.pump(async moment=>moment.fallback,(_moment,text)=>lines.push(text));
+    await new Promise(r=>setImmediate(r));
+    assert.equal(lines.length,1);
+    assert.match(lines[0],/挑战完成/);
+    assert.equal(show.get()?.challenge?.progress,1);
+    assert.equal((await show.observed(after,action,receipt.id)).length,0);
+  }finally{stop();await bridge.stop();await rm(dir,{recursive:true,force:true});}
 });
