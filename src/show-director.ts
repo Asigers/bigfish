@@ -85,7 +85,10 @@ function applicable(id:ChallengeId,a:Action):boolean{
 }
 export class ShowDirector{
   private journal:ShowJournal|undefined;
-  constructor(readonly storagePath=join(process.cwd(),"data","bigfish-show.json")){}
+  readonly storagePath:string;
+  constructor(storagePath=join(process.cwd(),"data","bigfish-show.json")){
+    this.storagePath=storagePath;
+  }
   get():ShowJournal|undefined{return this.journal;}
   async load():Promise<void>{
     try{
