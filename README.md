@@ -11,6 +11,7 @@
 - Tool management: select the real hoe/watering can; call their DoFunction for tile effects; detect and refill from water tiles. Character/tool animations may need additional Mac-game refinement.
 - Planning: Pi chooses a bounded **daily multi-day strategy** (`profit`, `expand`, `save`, seed reserve and money goal). A deterministic executor enforces real-world preconditions. Goal and activity journal persist in `data/bigfish-memory.json` through process restarts.
 - Livestream companion: **community DeepSeek whale-girl Live2D** (installed separately): native model animation, preset game-driven expressions, Pi speech bubbles and optional macOS TTS. An OBS browser source anchors the character bottom-right. Artwork is not committed to the repository.
+- Live Agent M3.1/M3.2: a separate, nonblocking Pi narration session, event-prioritized truthful commentary, daily show challenges validated against real game capabilities, and persistent progress counted **only** from verified game states. Demo uses local fallback captions without a model. See [M3 live acceptance](docs/m3-live-narration-show-acceptance.md).
 - Reliability: local token-authenticated bridge, one command in flight, command identity, game-state heartbeat and failure limits. Critical actions re-evaluate state after completion.
 
 ## Quick start (mock game, no key or Stardew)
