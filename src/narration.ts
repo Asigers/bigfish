@@ -88,9 +88,9 @@ export class NarrationScheduler{
   /** Never declare a game success until the controller verified the native outcome. */
   action(s:GameState,a:Action,confirmed:boolean,commandId:string):void{
     if(!commandId||!actionLabels[a.type]||this.saveId!==s.saveId||this.dayKey!==day(s))return;
-    const counter=(this.routine.get(a.type)??0)+1;
-    this.routine.set(a.type,counter);
     if(confirmed){
+      const counter=(this.routine.get(a.type)??0)+1;
+      this.routine.set(a.type,counter);
       const important=["harvest_crop","buy_seed","ship_item","craft_chest",
         "place_chest","craft_sprinkler","place_sprinkler"].includes(a.type);
       // Routine interactions are consolidated, not voiced at every tile.
