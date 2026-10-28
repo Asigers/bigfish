@@ -99,6 +99,18 @@ test("zero-spend show enforces economy policy and fails on observed gold loss",a
     assert.equal(show.allows({type:"buy_seed",itemId:"(O)472",count:1}),true);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+test("late verified actions cannot retroactively win a show",async()=>{
+  const {dir,show}=await director();
+  try{
+    await show.sync(base);
+    const option=eligibleChallenges(base).find(c=>c.id==="forage_find")!;
+    await show.start(base,option);
+    const received=await show.observed({...base,time:2100},
+      {type:"collect_forage",x:2,y:5},"late-action");
+    assert.equal(received[0]?.kind,"lost");
+    assert.equal(show.get()?.challenge?.progress,0);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
 test("deadline, day rollover and save switching never transfer fake progress",async()=>{
   const {dir,show}=await director();
   try{
