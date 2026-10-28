@@ -12,6 +12,9 @@ import { InfrastructurePlanner } from "./infrastructure.ts";
 import {reconcileSprinkler,SprinklerPlanner} from "./sprinklers.ts";
 import { GoalMemory } from "./strategy.ts";
 import { recordSpeech } from "./avatar.ts";
+import {LiveBrain} from "./live-brain.ts";
+import {NarrationScheduler} from "./narration.ts";
+import {ShowDirector,eligibleChallenges,chooseChallenge} from "./show-director.ts";
 import { startSimulator } from "./simulator.ts";
 import { actionObserved } from "./action-confirmation.ts";
 import { buildFarmPlan } from "./farm-plan.ts";
@@ -29,6 +32,13 @@ const token=process.env.BIGFISH_TOKEN||(demo?randomBytes(24).toString("hex"):"")
 const port=Number(process.env.BIGFISH_PORT||"45931");
 const bridge=new GameBridge(token,port,"127.0.0.1",demo?undefined:join(process.cwd(),"data","bridge-commands.json"));
 const brain=mock?undefined:new PiBrain();
+let liveBrain:LiveBrain|undefined=mock?undefined:new LiveBrain();
+const narration=new NarrationScheduler();
+const showDirector=new ShowDirector(mock?
+  join(process.cwd(),"data","bigfish-show.mock.json"):
+  join(process.cwd(),"data","bigfish-show.json"));
+let showSelectionKey="";
+let narrationTimer:ReturnType<typeof setInterval>|undefined;
 const planner=new Autopilot();
 const economy=new EconomyPlanner();
 const forager=new ForagePlanner();
@@ -46,7 +56,6 @@ let brainSessionSave:string|undefined;
 let lastInvestmentReport="";
 const recent:ActionResult[]=[];
 const pendingViewerEvents: import("./types.ts").ViewerEvent[]=[];
-let nextDialogueAt=0;
 let stopping=false;
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 let stopDemo:(()=>void)|undefined;
@@ -74,12 +83,52 @@ function requiredTool(state:GameState,action:Action):Action|undefined{
     if(tools.equipped!==tool)return {type:"equip_tool",tool};
   }
 }
-async function say(text:string,action:Action,goal:string,ok=true):Promise<void>{
-  const spoken=recordSpeech(text,action,goal,ok);
-  if(spoken)bridge.publishAvatar(spoken);
+function pumpNarration():void{
+  narration.pump(async (moment,prior)=>
+    liveBrain?liveBrain.narrate(moment,prior):moment.fallback,
+    (moment,text)=>{
+      const event=recordSpeech(text,{type:"wait",seconds:1},
+        moment.goal,true,moment.emotion);
+      if(event)bridge.publishAvatar(event);
+    });
+}
+async function verifiedShowAction(state:GameState,action:Action,commandId:string):Promise<void>{
+  const events=await showDirector.observed(state,action,commandId);
+  for(const e of events)narration.show(state,e);
+  narration.action(state,action,true,commandId);
+}
+function selectDailyShow(observed:GameState):void{
+  if(observed.location!=="Farm"||showDirector.get()?.challenge)return;
+  const key=observed.saveId+":"+(observed.year??1)+":"+observed.season+":"+observed.day;
+  if(showSelectionKey===key)return;
+  const candidates=eligibleChallenges(observed);
+  if(!candidates.length)return;
+  showSelectionKey=key;
+  // AI selection runs without awaiting the controller: game actions continue.
+  void (async()=>{
+    let requested:string|undefined;
+    if(liveBrain)try{requested=await liveBrain.choose(observed,candidates);}
+      catch(error){console.warn("[show] safe candidate fallback",
+        error instanceof Error?error.message:String(error));}
+    const fresh=bridge.getState();
+    if(!fresh||fresh.saveId!==observed.saveId||
+      (fresh.year??1)!==(observed.year??1)||fresh.season!==observed.season||
+      fresh.day!==observed.day)return;
+    const allowed=eligibleChallenges(fresh);
+    const picked=chooseChallenge(fresh,allowed,requested);
+    if(!picked)return;
+    const event=await showDirector.start(fresh,picked);
+    if(event){
+      narration.show(fresh,event);
+      console.log("[show]",JSON.stringify({challenge:picked.id,
+        target:picked.target,deadline:picked.deadline,source:requested?"pi":"fallback"}));
+    }
+  })().catch(error=>console.warn("[show] selection failed",
+    error instanceof Error?error.message:String(error)));
 }
 async function run():Promise<void>{
   await memory.load();
+  await showDirector.load();
   await bridge.start();
   const restored=bridge.getUncertain();
   if(restored){
@@ -92,6 +141,13 @@ async function run():Promise<void>{
     " | OBS avatar: http://127.0.0.1:"+port+"/overlay");
   if(demo)stopDemo=startSimulator(port,token);
   if(brain)await brain.start();
+  if(liveBrain)try{await liveBrain.start();}
+    catch(error){
+      console.warn("[live] narrator model unavailable; deterministic verified captions continue",
+        error instanceof Error?error.message:String(error));
+      liveBrain=undefined;
+    }
+  narrationTimer=setInterval(pumpNarration,1000);
   process.on("SIGINT",()=>{stopping=true;});
   process.on("SIGTERM",()=>{stopping=true;});
   while(!stopping){
@@ -114,6 +170,22 @@ async function run():Promise<void>{
       }
       brainSessionSave=s.saveId;
     }
+    if(showDirector.get()?.saveId && showDirector.get()?.saveId!==s.saveId){
+      showSelectionKey="";
+      if(liveBrain){
+        liveBrain.stop();
+        try{await liveBrain.start();}
+        catch(error){
+          console.warn("[live] new save narrator reset failed; safe captions only",
+            error instanceof Error?error.message:String(error));
+          liveBrain=undefined;
+        }
+      }
+    }
+    narration.reset(s);
+    const rollover=await showDirector.sync(s);
+    for(const e of rollover)narration.show(s,e);
+    for(const e of await showDirector.tick(s))narration.show(s,e);
     if(unconfirmed){
       const pending=unconfirmed;
       const uncertain=bridge.getUncertain();
@@ -131,6 +203,7 @@ async function run():Promise<void>{
         infrastructure.observe(pending.before,pending.action,failedReceipt);
         sprinklerPlanner.observe(pending.before,pending.action,failedReceipt);
         await memory.recordFarmResult(pending.before,pending.action,failedReceipt);
+        narration.action(s,pending.action,false,failedReceipt.id);
         history.recordVerifiedAction(pending.before,s,pending.action,failedReceipt.id,false);
         recent.push(failedReceipt);if(recent.length>8)recent.shift();
         console.warn("[game] late failure receipt reconciled:",failedReceipt.message);
@@ -156,6 +229,7 @@ async function run():Promise<void>{
           id:pending.commandId??"state-confirmed",ok:true,message:"state-confirmed"});
         history.recordVerifiedAction(pending.before,s,pending.action,
           pending.commandId??"state-confirmed",true);
+        await verifiedShowAction(s,pending.action,pending.commandId??"state-confirmed");
         console.log("[game] state confirmed after delayed sync:",pending.action.type,s.location);
         unconfirmed=undefined;
       }else{
@@ -203,9 +277,13 @@ async function run():Promise<void>{
         if(archived && archived.dayKey!==s.season+":"+s.day &&
           gameOrdinal(s)>0)
           history.recordCompletedDay(s.saveId,gameOrdinal(s)-1,archived);
-        await say("新的一天，本鲸的目标是："+plan.notes,{type:"wait",seconds:1},plan.goal);
+        // Live narration is queued independently, never waits on an LLM to play.
+        narration.beginDay(s,plan.notes);
       }
       let goal=memory.get()?.strategy??DEFAULT_STRATEGY;
+      narration.beginDay(s,goal.notes);
+      narration.reflect(s,goal.notes);
+      selectDailyShow(s);
       if(s.location==="Farm"&&s.economy){
         const former=memory.get()?.workProject;
         const project=updateWorkProject(s,former);
@@ -338,7 +416,9 @@ async function run():Promise<void>{
       // Deterministic safety/execution policy owns game actions. Pi supplies day-level strategy,
       // optional same-type action candidates and a voiced character.
       const foodNeed=foodPlanner.propose(s);
-      const economic=foodNeed?undefined:economy.propose(s,goal,field,project);
+      const forbidPurchases=!showDirector.allows({type:"buy_seed",itemId:"(O)472",count:1});
+      const economic=foodNeed?undefined:economy.propose(s,goal,field,project,
+        {forbidPurchases});
       let d:Decision=foodNeed??economic??planner.decide(s,field);
       let forageChosen=Boolean(foodNeed);
       // Productive gathering begins only after farming and financial errands have
@@ -368,17 +448,12 @@ async function run():Promise<void>{
       }
       const toolAction=requiredTool(s,d.action);
       if(toolAction)d={action:toolAction,reason:"Prepare correct real game tool",speech:"先拿好工具。"};
-      if(brain && (Date.now()>=nextDialogueAt || d.action.type==="sleep" || d.action.type==="buy_seed")){
-        nextDialogueAt=Date.now()+18000;
-        try{
-          const proposed=await brain.decide(s,recent,pendingViewerEvents);
-          pendingViewerEvents.length=0;
-          // Pi sets the daily strategy and narrates the action; the field planner
-          // and world executor own exact tiles, item IDs and route choices.
-          // An equally-typed model action may still target the wrong plot or warp.
-          if(proposed.speech)d={...d,speech:proposed.speech};
-        }catch(error){console.warn("[brain] using safe plan:",error instanceof Error?error.message:String(error));}
-      }
+      // Game command selection no longer waits for a per-action LLM speech call.
+      // Show challenges cannot override any established world/safety validator.
+      if(!showDirector.allows(d.action))
+        d={action:{type:"wait",seconds:5},
+          reason:"Live show no-spend constraint; avoid shop purchase",
+          speech:"今天约好了不花钱，先把购物放一放。"};
       // The model can take many seconds; never issue a decision based on a different
       // day, map, player tile or pause state than the latest snapshot.
       const latest=bridge.getState();
@@ -395,7 +470,6 @@ async function run():Promise<void>{
       }
       action=d.action;
       console.log("[bigfish]",JSON.stringify({day:s.day,time:s.time,energy:s.energy,location:s.location,goal:goal.goal,action,reason:d.reason}));
-      await say(d.speech,action,goal.notes);
       if(action.type==="wait"){await sleep(action.seconds*1000);continue;}
       const timeout=action.type==="sleep"?95000:action.type==="travel_to"?25000:action.type==="eat_food"||action.type==="pickup_drop"?25000:15000;
       const before=bridge.getStateSequence();
@@ -405,9 +479,10 @@ async function run():Promise<void>{
       // Never re-label a successful game command as failed just because /state is late.
       if(result.ok){
         try{
-          await bridge.waitForNextState(before,6000,
+          const confirmed=await bridge.waitForNextState(before,6000,
             observed=>actionObserved(action!,s,observed));
           stateConfirmed=true;
+          await verifiedShowAction(confirmed,action,result.id);
         }catch{
           unconfirmed={action,before:s,sequence:before,lastWarningAt:Date.now(),since:Date.now()};
           console.warn("[game] command acknowledged, but resulting state is not confirmed;",
@@ -417,7 +492,7 @@ async function run():Promise<void>{
       recent.push(result);if(recent.length>8)recent.shift();
       if(["buy_seed","ship_item","store_item","withdraw_item","sleep","harvest_crop","craft_chest","place_chest","craft_sprinkler","place_sprinkler"].includes(action.type))
         await memory.note(action.type+": "+result.message,result.ok);
-      if(!result.ok)await say("哎呀，刚才失败了："+result.message,{type:"wait",seconds:1},goal.notes,false);
+      if(!result.ok)narration.action(s,action,false,result.id);
       await sleep(result.ok?200:1200);
     }catch(error){
       if(error instanceof CommandOutcomeUnknownError && action && action.type!=="wait"){
@@ -452,4 +527,8 @@ async function run():Promise<void>{
 }
 try{await run();}
 catch(error){console.error("[bigfish] startup failed:",error);process.exitCode=1;}
-finally{stopDemo?.();brain?.stop();history.close();await bridge.stop();}
+finally{
+  if(narrationTimer)clearInterval(narrationTimer);
+  narration.close();liveBrain?.stop();stopDemo?.();brain?.stop();
+  history.close();await bridge.stop();
+}
