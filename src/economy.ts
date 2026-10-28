@@ -53,9 +53,10 @@ export class EconomyPlanner {
     if(action&&!ok)this.failed.set(s.location+":"+actionKey(action),(this.failed.get(s.location+":"+actionKey(action))??0)+1);
     if(action?.type==="buy_seed"&&ok)this.shopAttempted=true;
   }
-  propose(s:GameState,strategy:Strategy=DEFAULT_STRATEGY,farmPlan?:FarmPlan,project?:FarmWorkProject):Decision|undefined{
+  propose(s:GameState,strategy:Strategy=DEFAULT_STRATEGY,farmPlan?:FarmPlan,project?:FarmWorkProject,policy?:{forbidPurchases?:boolean}):Decision|undefined{
     this.update(s);
     const e=s.economy;
+    if(policy?.forbidPurchases)this.errand=null;
     if(!e||s.paused)return;
     const allowed=(a:Action)=>(this.failed.get(s.location+":"+actionKey(a))??0)<2;
     const issue=(a:Action,why:string,speech:string):Decision|undefined=>allowed(a)?d(a,why,speech):undefined;
@@ -119,7 +120,7 @@ export class EconomyPlanner {
       }
       // Do not leave crops unwatered to buy seeds; farm-day planner handles crops first.
       const workPending=s.crops.some(c=>!c.watered||c.ready) || (seedCount>0&&s.emptyPlots.length>0);
-      if(!workPending&&needSeeds&&(!validPlan||validPlan.crops.length>0)&&
+      if(!policy?.forbidPurchases&&!workPending&&needSeeds&&(!validPlan||validPlan.crops.length>0)&&
         spendableGold>=20&&s.time>=830&&s.time<1530&&!this.shopAttempted){
         const step=travel("SeedShop","Buy next batch of seeds","去皮埃尔那儿补货！");
         if(step){this.errand="buy";return step;}
@@ -135,7 +136,7 @@ export class EconomyPlanner {
         this.errand=null;
         return travel("Farm","Shop is closed or keeper absent","商店不开门，先回家。");
       }
-      if(!needSeeds || this.shopAttempted || spendableGold<20){
+      if(policy?.forbidPurchases || !needSeeds || this.shopAttempted || spendableGold<20){
         this.errand=null;
         return travel("Farm","Return with purchased seeds","带着种子回农场！");
       }

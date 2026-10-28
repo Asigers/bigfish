@@ -15,11 +15,11 @@ export function emotionFor(action:Action,ok=true):Emotion{
   return "idle";
 }
 export function canSpeak(now=Date.now()):boolean{return now-lastTalk>9000;}
-export function recordSpeech(text:string,action:Action,goal:string,ok=true):AvatarEvent|undefined{
+export function recordSpeech(text:string,action:Action,goal:string,ok=true,emotion?:Emotion):AvatarEvent|undefined{
   const cleaned=text.replace(/[\r\n]+/g," ").slice(0,100).trim();
   if(!cleaned||!canSpeak())return;
   lastTalk=Date.now();
-  const event:AvatarEvent={type:"speech",text:cleaned,emotion:emotionFor(action,ok),goal:goal.slice(0,70),at:lastTalk};
+  const event:AvatarEvent={type:"speech",text:cleaned,emotion:emotion??emotionFor(action,ok),goal:goal.slice(0,70),at:lastTalk};
   events.push(event);if(events.length>10)events.shift();
   if(process.platform==="darwin"&&process.env.BIGFISH_TTS==="say"&&!activeVoice){
     activeVoice=true;
