@@ -35,11 +35,12 @@ export class NarrationScheduler{
   reset(s:GameState):void{
     const key=day(s);
     if(s.saveId===this.saveId&&key===this.dayKey)return;
+    const switched=this.saveId!==s.saveId;
     this.saveId=s.saveId;this.dayKey=key;this.queue=[];
     this.seen.clear();this.emitted.clear();this.routine.clear();
     this.generation++;
     // Do not copy commentary or pending prompts across saves.
-    if(this.saveId!==s.saveId)this.recentTexts=[];
+    if(switched)this.recentTexts=[];
   }
   close():void{this.closed=true;this.generation++;this.queue=[];}
   pending():number{return this.queue.length;}
