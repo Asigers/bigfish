@@ -31,7 +31,11 @@ export class NarrationScheduler{
   private generation=0;
   private routine=new Map<string,number>();
   private closed=false;
-  constructor(private readonly cooldownMs=12000,private readonly now:()=>number=Date.now){}
+  private readonly cooldownMs:number;
+  private readonly now:()=>number;
+  constructor(cooldownMs=12000,now:()=>number=Date.now){
+    this.cooldownMs=cooldownMs;this.now=now;
+  }
   reset(s:GameState):void{
     const key=day(s);
     if(s.saveId===this.saveId&&key===this.dayKey)return;
