@@ -99,11 +99,11 @@ export class NarrationScheduler{
       const fallback=important?`${actionLabels[a.type]}！计划又向前迈进了一步。`:
         `忙活了一阵，${actionLabels[a.type]}，已经做了${counter}次。`;
       this.enqueue({key:"action:"+a.type+":"+Math.floor(counter/4),kind:"verified_success",
-        priority:important?6:2,fact,fallback,emotion:important?"excited":"happy",
+        priority:important?9:2,fact,fallback,emotion:important?"excited":"happy",
         goal:"农场经营",saveId:s.saveId,dayKey:day(s)});
     }else{
       // This is only used for authoritative negative receipts, never uncertain ACKs.
-      this.enqueue({key:"fail:"+commandId,kind:"verified_failure",priority:7,
+      this.enqueue({key:"fail:"+commandId,kind:"verified_failure",priority:9,
         fact:`游戏已明确报告${a.type}执行失败`,fallback:"这一步没成功，换个办法再试。",
         emotion:"sad",goal:"处理失败",saveId:s.saveId,dayKey:day(s)});
     }
